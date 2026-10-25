@@ -16,9 +16,10 @@ the new entity, and the chunk carries the second record's CmFD as any owner fram
 dropped, statescript.Stream.next_cmfd).
 
 Two bisection knobs let a deployment narrow the picture without code changes: DROP_GRAPHS leaves
-whole graphs out (by 16-bit index), ALLOW_STATES restricts which state classes are activated by
-name suffix (the SubScript launchers and the HUD gate states are structure and stay on). With
-ALLOW_STATES unset every class is activated except HAS_DATA_STATES below: those three need the
+whole graphs out (by 16-bit index), and the `allow` argument restricts which state classes are
+activated by name suffix (the SubScript launchers and the HUD gate states are structure and stay
+on regardless). With `allow` unset every class is activated except HAS_DATA_STATES below: those
+three need the
 second-bit has-data form owner_full_frame does not write yet, and a bare active bit for them
 shifts every later field in the frame.
 """
@@ -26,8 +27,10 @@ shifts every later field in the frame.
 from ow174.game import statescript
 from ow174.game.script import graph
 
-DROP_GRAPHS: set[int] = set()
-ALLOW_STATES: set[str] | None = None
+DROP_GRAPHS: set[int] = set()  # 16-bit graph indexes to leave out of every picture
+# The state classes to activate, a set of name suffixes or None for "all the encoder can write".
+# Every body_* function takes it explicitly; SHIP_STATES below is what a live server sends.
+SHIP_STATES = frozenset({"HealthPool", "BooleanSwitch", "Stack", "Wait", "UXPresenter"})
 STRUCTURAL = {"STU_37D754C8", "STU_9D7BF987"}  # SubScript launchers and the HUD widget gates
 
 VAR_ID_MASK = 0xFFFFFFFFFFFF  # the .01C identifier's index, without the type bits
@@ -45,9 +48,8 @@ HAS_DATA_STATES = {
 }
 
 
-def _allowed(cls: str) -> bool:
-    return ALLOW_STATES is None or cls in STRUCTURAL or any(cls == a or cls.endswith(a)
-                                                           for a in ALLOW_STATES)
+def _allowed(cls: str, allow: set[str] | None) -> bool:
+    return allow is None or cls in STRUCTURAL or any(cls == a or cls.endswith(a) for a in allow)
 
 
 def _value(entry):
@@ -71,7 +73,9 @@ def _subscript_target(node) -> int | None:
     return next(iter(found), None) if found else None
 
 
-def body_instances(body_guid: int) -> tuple[list, dict]:
+def body_instances(
+    body_guid: int, allow: set[str] | None = None
+) -> tuple[list, dict]:
     """The body's initial graphs as (instances, entity vars) for an owner full frame.
 
     Every graph of the body's statescript component becomes a root instance carrying its schema
@@ -122,8 +126,8 @@ def body_instances(body_guid: int) -> tuple[list, dict]:
                     active[slot] = statescript.subscript(child)
             elif node.cls in HAS_DATA_STATES:
                 continue  # needs the two-bit has-data form; a bare bit desyncs the snapshot
-            elif not _allowed(node.cls):
-                continue  # ALLOW_STATES: not activated, no entry in the mask
+            elif not _allowed(node.cls, allow):
+                continue  # outside the allow-list: not activated, no entry in the mask
             elif node.cls in statescript.DATA_STATES:
                 active[slot] = statescript.active_data(node.cls)()  # the class's own data bits
             else:
@@ -140,28 +144,32 @@ def body_instances(body_guid: int) -> tuple[list, dict]:
     return instances, entity_vars
 
 
-def body_frame(body_guid: int, cmfd: int, lbss: int | None = None):
+def body_frame(
+    body_guid: int, cmfd: int, lbss: int | None = None, allow: set[str] | None = None
+):
     """The owner full frame of the body's scripts, None for a body the data does not describe.
     `cmfd` must exceed the last CmFD sent to this entity, as any owner frame does."""
-    instances, entity_vars = body_instances(body_guid)
+    instances, entity_vars = body_instances(body_guid, allow)
     if not instances:
         return None
     return statescript.owner_full_frame(cmfd, instances, entity_vars, lbss)
 
 
-def body_graph_chunk(body_guid: int):
+def body_graph_chunk(body_guid: int, allow: set[str] | None = None):
     """The first record on a fresh body: an empty graph-info frame at base 1. The fresh entity's
     manager holds no instances until the first full snapshot creates them; listing them here too
     makes the snapshot create them a second time."""
-    instances, _ = body_instances(body_guid)
+    instances, _ = body_instances(body_guid, allow)
     if not instances:
         return None
     return statescript.chunk(statescript.graph_create_frame([]), 1, 1)
 
 
-def body_full_chunk(body_guid: int, cmfd: int):
+def body_full_chunk(
+    body_guid: int, cmfd: int, allow: set[str] | None = None
+):
     """The second record: the activating full snapshot, wrapped at base 0 (last frame 2, so it
     stays above the create's graph-info frame and cannot queue-stall). The same blob wrapped at a
     numbered base is ignored: a full frame at base 0 is what resets and creates the instances."""
-    frame = body_frame(body_guid, cmfd)
+    frame = body_frame(body_guid, cmfd, allow=allow)
     return None if frame is None else statescript.chunk(frame, 0, 3)

@@ -10,21 +10,11 @@ from ow174.game import loadout, statescript
 from ow174.game.content import heroes
 
 
-def bitstring(bits: statescript.BitWriter) -> str:
+def bitstring(bits) -> str:
     return "".join(str((bits.value >> k) & 1) for k in range(bits.count))
 
 
-def bytewise(bits) -> int:
-    return (bits.count + 7) // 8
-
-
 class LoadoutTests(unittest.TestCase):
-    def setUp(self):
-        self.saved = loadout.ALLOW_STATES
-
-    def tearDown(self):
-        loadout.ALLOW_STATES = self.saved
-
     def test_every_described_body_builds_the_pair_of_chunks(self):
         for body in sorted(loadout.graph.bodies()):
             create = loadout.body_graph_chunk(body)
@@ -44,9 +34,8 @@ class LoadoutTests(unittest.TestCase):
         )
 
     def test_hero_frames_are_the_sizes_the_live_run_proved(self):
-        # Measured on the accepted live frames: instance counts, entity vars and the full snapshot's
-        # bit size per hero body (the numbers a regression to the encoder must not change).
-        loadout.ALLOW_STATES = None
+        # Unrestricted frames per hero body: instance counts, entity vars and the full snapshot's
+        # bit size (the numbers a regression to the encoder must not change).
         expected = {
             "Echo": (8, 6, 1063, 1108),
             "Genji": (8, 7, 1049, 1094),
@@ -55,15 +44,15 @@ class LoadoutTests(unittest.TestCase):
         }
         for name, (graphs, evars, frame_bits, full_bits) in expected.items():
             hero = next(h for h in heroes().values() if h.name == name)
-            instances, entity_vars = loadout.body_instances(hero.body)
+            instances, entity_vars = loadout.body_instances(hero.body, allow=None)
             self.assertEqual(len(instances), graphs, name)
             self.assertEqual(len(entity_vars), evars, name)
-            self.assertEqual(loadout.body_frame(hero.body, 1).count, frame_bits, name)
-            self.assertEqual(loadout.body_full_chunk(hero.body, 9).count, full_bits, name)
+            self.assertEqual(loadout.body_frame(hero.body, 1, allow=None).count, frame_bits, name)
+            self.assertEqual(loadout.body_full_chunk(hero.body, 9, allow=None).count, full_bits, name)
 
     def test_the_hero_asset_and_the_hud_gates_ride_the_entity_block(self):
         hero = next(h for h in heroes().values() if h.name == "Echo")
-        _, entity_vars = loadout.body_instances(hero.body)
+        _, entity_vars = loadout.body_instances(hero.body, allow=None)
         asset = entity_vars[0x03AC]  # every StateHero reads this; a null guid and the client exits
         self.assertIsInstance(asset, statescript.Asset)
         self.assertEqual(asset.guid, hero.guid)
@@ -72,11 +61,12 @@ class LoadoutTests(unittest.TestCase):
         self.assertNotIn(17906, entity_vars)
 
     def test_the_state_allow_list_keeps_structure_and_shrinks_the_picture(self):
-        loadout.ALLOW_STATES = {"HealthPool", "BooleanSwitch", "Stack", "Wait", "UXPresenter"}
-        instances, entity_vars = loadout.body_instances(0x0400000000002593)
+        # The shipped allow-list keeps every graph and launcher and drops a few state payloads: the
+        # same body picture, minus the classes whose begin actions need encoders that are not here yet.
+        instances, entity_vars = loadout.body_instances(0x0400000000002593, allow=loadout.SHIP_STATES)
         self.assertEqual(len(instances), 8)  # the graphs stay: launchers and gates are structure
         self.assertEqual(len(entity_vars), 6)
-        self.assertEqual(loadout.body_frame(0x0400000000002593, 1).count, 1058)  # 5 bits less
+        self.assertEqual(loadout.body_frame(0x0400000000002593, 1, allow=loadout.SHIP_STATES).count, 1058)
         launchers = [
             slot for instance in instances for slot in instance.active
             if instance.graph.index != statescript.HUD.index

@@ -16,7 +16,7 @@ import time
 from ctypes import wintypes
 from dataclasses import dataclass
 
-from ow174.game import messages, world
+from ow174.game import loadout, messages, world
 from ow174.game.bits import BitReader
 from ow174.game.commands import InputError, read_commands
 from ow174.game.link import (
@@ -249,11 +249,26 @@ class Client:
 
 
 class GameServer:
-    def __init__(self, host: str = "127.0.0.1", port: int = 3730, on_leave=None, skin_of=no_skin) -> None:
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 3730,
+        on_leave=None,
+        skin_of=no_skin,
+        hero_scripts=False,
+        hero_states: set[str] | None = None,
+    ) -> None:
         self.host = host
         self.port = port
         self.on_leave = on_leave  # called with each player who leaves a match
         self.skin_of = skin_of  # (account, hero) -> the equipped (skin theme, golden weapon); no locks
+        # Give every hero body its statescript graphs (the HUD's data source, see loadout.py).
+        # hero_states overrides the shipped allow-list; None keeps the shipped set, an empty set
+        # sends every class the encoder can write today.
+        # Give every hero body its statescript graphs (the HUD's data source, see loadout.py).
+        # hero_states replaces the shipped allow-list; None means everything the encoder can write.
+        self.hero_scripts = hero_scripts
+        self.hero_states = hero_states if hero_states is not None else loadout.SHIP_STATES
         self.sock: socket.socket | None = None
         self.lock = threading.RLock()
         self.handoffs: dict[int, tuple[Handoff, Player]] = {}  # connection id -> waiting player
@@ -283,7 +298,13 @@ class GameServer:
         """A match for these players: [(account_lo, name, hero GUID, team, tournament)]. Returns the
         20600 data of each, in the same order."""
         with self.lock:
-            match = Match(game_map, on_leave=self._left, skin_of=self.skin_of)
+            match = Match(
+                game_map,
+                on_leave=self._left,
+                skin_of=self.skin_of,
+                hero_scripts=self.hero_scripts,
+                hero_states=self.hero_states,
+            )
             handoffs = []
             for account_lo, name, hero, team, tournament in players:
                 player = match.add_player(account_lo, name, hero, team, tournament)

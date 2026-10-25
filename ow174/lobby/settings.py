@@ -17,4 +17,8 @@ class Settings:
     # 0: a match starts with full teams, as the queue's mode has them. N: it starts as soon as N
     # players search the same queue (for tests with fewer players).
     test_players: int = 0
+    # Give hero bodies their statescript graphs (the HUD's data source, ow174/game/loadout.py).
+    # hero_states replaces the state allow-list; empty keeps the shipped set (see GameServer).
+    hero_scripts: bool = False
+    hero_states: tuple[str, ...] = ()
     paths: Paths = field(default_factory=Paths)

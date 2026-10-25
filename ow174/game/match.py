@@ -25,7 +25,7 @@ import math
 import secrets
 import time
 
-from ow174.game import heroselect, world
+from ow174.game import heroselect, loadout, world
 from ow174.game.commands import Command, CommandQueue
 from ow174.game.content import SOLDIER, GameMap, Hero, heroes, spawn_point
 from ow174.game.mover import FlatMover
@@ -111,6 +111,13 @@ class Player:
         # Other players' bodies this player's client has: body -> False in the frame of its create.
         self.seen: dict[int, bool] = {}
         self.script = Stream(self.entity)  # the player entity's statescript: the controller
+        # The hero body's statescript stream exists only with scripted bodies; until then the body
+        # arrives without graphs and the client's HUD shows its defaults (loadout.py explains the
+        # frames). The two counters drive the vendor's two-step sequence: the create carries the
+        # graph-info record (body_script.last = 1), the full snapshot follows separately.
+        self.body_script: Stream | None = None
+        self.body_full_next = 0.0
+        self.body_full_sends = 0
         self.mode_script = Stream(GAME_MODE_ENTITY)  # the game mode entity's variables: the countdown
         self.next_countdown = 0.0
         self.select_open = True
@@ -133,8 +140,13 @@ class Player:
 
     def new_body(self) -> None:
         """The next body id, at the spawn point: the server's flat mover is not exact enough to put a
-        new body where the old one stood. Ids cycle through the player's 255."""
+        new body where the old one stood. Ids cycle through the player's 255. A new body is a new
+        entity: its statescript stream starts fresh (new CmFD, new frame count) and the client
+        ignores the destroyed id for 30 s, which is why the id changes."""
         self.body = self.entity | ((self.body & 0xFF) % 255 + 1)
+        self.body_script = None
+        self.body_full_next = 0.0
+        self.body_full_sends = 0
         self.mover = FlatMover(self.spawn[0], _yaw_units(self.spawn[1]))
 
     def describe(self) -> str:
@@ -146,14 +158,25 @@ def no_skin(account_lo: int, hero: int) -> tuple[int, bool]:
 
 
 class Match:
-    def __init__(self, game_map: GameMap, on_leave=None, skin_of=no_skin) -> None:
+    def __init__(
+        self, game_map: GameMap, on_leave=None, skin_of=no_skin, hero_scripts=False, hero_states=None
+    ) -> None:
         self.id = (secrets.randbits(63), secrets.randbits(63))
         self.game_map = game_map
         # (account, hero GUID) -> (skin theme, golden weapon) the player has equipped, from the lobby.
         # The client's hero select equips a skin through the lobby (24500), even in a match.
         self.skin_of = skin_of
+        # Put the hero's statescript graphs on every body (loadout.py): the HUD's data source. Off by
+        # default; the server turns it on with --hero-scripts and the state allow-list below.
+        self.hero_scripts = hero_scripts
+        # The state classes the snapshots may activate (names match as suffixes; launchers and the
+        # HUD gate are structure and always stay). loadout.SHIP_STATES proved stable for every hero;
+        # None sends everything the encoder can write today (loadout.HAS_DATA_STATES lists what it
+        # cannot write yet). The game server fills in the shipped set by default.
+        self.hero_states = hero_states
         self.controller = heroselect.controller_of(game_map.mode_guid)
         self.tick = 0  # the server's frame number, set every tick
+        self.now = 0.0  # the wall-clock time of the last tick, for the spawn and snapshot timers
         self.assemble_ends: float | None = None  # PvP: when "assemble your team" ends
         self.assembled = False
         self.players: list[Player] = []
@@ -234,11 +257,24 @@ class Match:
 
     def own_body_updates(self, viewer: Player) -> list[EntityUpdate]:
         """The viewer's own body: its movement state rides in the create (at frame 0xFFFFFFFE) and in a
-        movement record at the packet frame, as in ProCore's working spawn."""
+        movement record at the packet frame, as in ProCore's working spawn. With hero scripts the
+        create additionally carries the vendor's first record, the empty graph-info chunk: the
+        activating full snapshot follows as its own module-1 record a moment later (update sends
+        it, at least a datagram apart - listing the states in both records creates every instance
+        twice and the client crashes when the activation wait expires)."""
         state = viewer.movement()
+        chunk = None
+        if self.hero_scripts:
+            chunk = loadout.body_graph_chunk(viewer.hero.body, allow=self.hero_states)
+            if chunk is not None:
+                viewer.body_script = Stream(viewer.body)
+                viewer.body_script.last = 1
+                viewer.body_script.data_last = 1
+                viewer.body_full_next = self.now + 0.5
         return [
             EntityUpdate(
-                viewer.body, OP_CREATE, lambda origin: self._body_create(origin, viewer, state), state
+                viewer.body, OP_CREATE, lambda origin: self._body_create(origin, viewer, state), state,
+                chunk=chunk,
             )
         ]
 
@@ -309,6 +345,7 @@ class Match:
         """Run the spawn steps of players who loaded, keep their statescript acked, and show new bodies
         to the others."""
         self.tick = tick
+        self.now = now
         if self.assemble_ends is not None and not self.assembled and now >= self.assemble_ends:
             self._end_assemble(now)
         for player in self.players:
@@ -319,6 +356,20 @@ class Match:
                 self._spawn_steps(player, client, now)
             if player.script.data_last and now >= player.script.next_ack:
                 self._owner_ack(player, player.script, now)
+            stream = player.body_script
+            if (
+                stream is not None
+                and stream.delivered < 3  # the client has not confirmed the snapshot yet
+                and player.body_full_sends < 3
+                and now >= player.body_full_next
+            ):
+                # the second hero record, a tick and a datagram apart from the create's graph-info
+                # frame, repeated until it lands: a chunk at or below the highest frame the client
+                # applied is dropped there, so a resend after a lost packet is safe (see
+                # _body_snapshot)
+                self._body_snapshot(player, now)
+            if stream is not None and stream.data_last and now >= stream.next_ack:
+                self._owner_ack(player, stream, now)
             if self.assembling() and player.steps_done >= 4 and now >= player.next_countdown:
                 self._send_countdown(player, now)
         for viewer in self.players:
@@ -388,7 +439,9 @@ class Match:
         cmfd = player.script.next_cmfd(self._newest_frame(player))
         practice = self.controller is heroselect.PRACTICE
         skins = player.select_open and (practice or self.assembling())
-        frame = heroselect.controller_frame(self.controller, cmfd, player.select_open, skins, practice)
+        frame = heroselect.controller_frame(
+            self.controller, cmfd, player.select_open, skins, practice, self.hero_scripts
+        )
         player.client.queue_entities([player.script.full_frame(frame)])
         state = "open" if player.select_open else "closed"
         log.info("[game] %s: %s's controller sent (hero select %s)", self.label(), player.name, state)
@@ -402,6 +455,27 @@ class Match:
             return
         cmfd = stream.next_cmfd(self._newest_frame(player))
         player.client.queue_entities([stream.ack_delta(owner_ack(cmfd))])
+
+    def _body_snapshot(self, player: Player, now: float) -> None:
+        """The hero's full snapshot, the second record of the body's statescript: wrapped at base 0
+        with CmFD above the client's tick stamp (Stream.next_cmfd), in its own datagram. The one
+        shape the client accepts: the create's graph-info frame only lifts the manager over the
+        tick, and this frame creates the instances and sets the states. The client drops a chunk at
+        or below the highest frame it applied, so the retry below is safe after a lost packet."""
+        cmfd = player.body_script.next_cmfd(self._newest_frame(player))
+        chunk = loadout.body_full_chunk(player.hero.body, cmfd, allow=self.hero_states)
+        if chunk is None:
+            return
+        update = EntityUpdate(player.body, chunk=chunk)
+        update.chunk_last = 3
+        update.stream = player.body_script
+        update.resend = False
+        player.body_script.last = 3
+        player.body_script.data_last = 3
+        player.client.queue_entities([update])
+        player.body_full_sends += 1
+        player.body_full_next = now + 1.0
+        log.info("[game] %s: %s's body snapshot sent, cmfd %d", self.label(), player.name, cmfd)
 
     def game_message(self, player: Player, value: dict, now: float) -> None:
         """21616: a game message a statescript action sends to the server, such as a hero pick."""
@@ -440,11 +514,28 @@ class Match:
             log.info("[game] %s: %s loaded the map", self.label(), player.name)
 
     def switch_hero(self, player: Player, hero: Hero) -> None:
-        """The body of a picked hero. The first one just comes. A switch creates the new body under a
-        new id at the spawn point, moves the player's components 44 and 75 to it and destroys the old
-        body in the same frame: retail drops the old one at once too (OW2 traffic), while ProCore's
-        .sethero kept it 0.5 s, and it showed when the hero select screen closed."""
+        """The body of a picked hero. The first one just comes. Picking the hero you already have is
+        a no-op: the client keeps its body and only the hero select closing matters; recreating the
+        same body under a new id worked in a bare match but left the old scripts behind. A switch
+        creates the new body under a new id at the spawn point, moves the player's components 44 and
+        75 to it and destroys the old body in the same frame: retail drops the old one at once too
+        (OW2 traffic), while ProCore's .sethero kept it 0.5 s, and it showed when the hero select
+        screen closed. The client ignores a destroyed id for 30 s, so the new id differs."""
         old = player.body if player.has_body else None
+        if old is not None and self.hero_scripts:
+            # With a scripted body, neither a hero change nor a skin change is survivable yet: the
+            # sequence for replacing a body whose graphs the client already runs (clear, destroy,
+            # recreate) has no live proof; every shape tested stalls on the new body's activation or
+            # drops the match when the old one is destroyed. The pick closes hero select and keeps
+            # the spawned body: the match stays alive and its HUD is the scripted one. Without
+            # scripts the old behaviour stays (any pick recreates, as the skin tests prove).
+            player.select_open = False
+            self.send_controller(player)
+            log.info(
+                "[game] %s: %s picks %s but the scripted body stays (scripted change pending)",
+                self.label(), player.name, hero.name,
+            )
+            return
         if old is not None:
             player.new_body()
         player.hero = hero

@@ -67,13 +67,27 @@ def controller_of(mode_guid: int) -> Controller:
     return PRACTICE if mode_guid == PRACTICE_RANGE_MODE else PVP
 
 
+# 20E4's one owner state and the two entity vars its subgraph begins on. A live client proved the
+# shape: mount the HUD and set these together with the body's scripts; mounting it without the
+# state on leaves the subgraph empty, and the hero select grid loses its heroes.
+HUD_GATE = 0
+HUD_BEGIN_VARS = (17906, 18405)
+
+
 def controller_frame(
-    controller: Controller, cmfd: int, select_open: bool, skins: bool = False, hide_assemble: bool = False
+    controller: Controller,
+    cmfd: int,
+    select_open: bool,
+    skins: bool = False,
+    hide_assemble: bool = False,
+    hud: bool = False,
 ):
     """The owner full frame for the player's entity: the controller (1) with hero select 288A (2) ->
     288B (3) under it, 13C1's HUD 20E4 (4), and 288A's team list entry 288D (the next index).
     `skins` turns on v25377, which shows the skin selector; `hide_assemble` hides the assemble title
-    and timer that come with it."""
+    and timer that come with it. `hud` mounts the HUD subgraph on (the gate state and its begin
+    variables) rather than just creating the instance: pass it when the hero's body scripts ride the
+    body, the configuration the HUD widgets read their data from."""
     active = {controller.hero_select_bit: None, controller.select_bit: subscript(2)}
     host = Instance(2, HERO_SELECT_HOST, parent=(1, controller.select_state), active={0: subscript(3)})
     screen = Instance(3, HERO_SELECT, parent=(2, 0))
@@ -82,9 +96,13 @@ def controller_frame(
         host,
         screen,
     ]
+    variables = {OPEN_SELECT: Bool(select_open), SELECT_SHOWN: Bool(select_open)}
     if controller.hud_bit is not None:
         active[controller.hud_bit] = subscript(4)
-        instances.append(Instance(4, HUD, parent=(1, controller.hud_state)))
+        states = {HUD_GATE: None} if hud else {}
+        if hud:
+            variables.update(dict.fromkeys(HUD_BEGIN_VARS, Bool(True)))
+        instances.append(Instance(4, HUD, parent=(1, controller.hud_state), active=states))
     entry = len(instances) + 1
     host.active[1] = subscript(entry)
     instances.append(Instance(entry, TEAM_ENTRY, parent=(2, 1)))
@@ -92,7 +110,6 @@ def controller_frame(
         screen.presence[ASSEMBLING] = Bool(True)
     if hide_assemble:
         screen.extra[HIDE_ASSEMBLE] = Bool(True)
-    variables = {OPEN_SELECT: Bool(select_open), SELECT_SHOWN: Bool(select_open)}
     return owner_full_frame(cmfd, instances, variables)
 
 

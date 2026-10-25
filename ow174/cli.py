@@ -99,6 +99,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="start a match once this many players search (default: 0 = full teams only)",
     )
     parser.add_argument(
+        "--hero-scripts",
+        action="store_true",
+        default=defaults.hero_scripts,
+        help="give hero bodies their statescript graphs: the HUD then has a data source (beta)",
+    )
+    parser.add_argument(
+        "--hero-states",
+        default="",
+        help="with --hero-scripts: state classes the bodies may activate, comma separated; "
+        "empty (default) keeps the shipped set (health, switches, stacks, waits, UX widgets)",
+    )
+    parser.add_argument(
         "--save", type=Path, default=defaults.paths.template, help="template profile for new accounts"
     )
     parser.add_argument(
@@ -198,6 +210,8 @@ def run(args: argparse.Namespace) -> None:
         game_port=args.game_port,
         game_host=args.game_host,
         test_players=max(0, args.test_players),
+        hero_scripts=args.hero_scripts,
+        hero_states=tuple(name.strip() for name in args.hero_states.split(",") if name.strip()),
         paths=_paths(args),
     )
     game = relay = None
