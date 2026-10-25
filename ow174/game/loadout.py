@@ -28,8 +28,10 @@ from ow174.game import statescript
 from ow174.game.script import graph
 
 DROP_GRAPHS: set[int] = set()  # 16-bit graph indexes to leave out of every picture
-# The state classes to activate, a set of name suffixes or None for "all the encoder can write".
-# Every body_* function takes it explicitly; SHIP_STATES below is what a live server sends.
+# The state classes the static picture activates, a set of name suffixes or None for "all the
+# one-bit classes the encoder can write". Every body_* function takes it explicitly; SHIP_STATES
+# below is what a live server sends. The two-bit classes below ignore it: they move through
+# `entries`, because the client must see them begin and stop with real data.
 SHIP_STATES = frozenset({"HealthPool", "BooleanSwitch", "Stack", "Wait", "UXPresenter"})
 STRUCTURAL = {"STU_37D754C8", "STU_9D7BF987"}  # SubScript launchers and the HUD widget gates
 
@@ -37,10 +39,11 @@ VAR_ID_MASK = 0xFFFFFFFFFFFF  # the .01C identifier's index, without the type bi
 
 # The native predicate over the graph metadata divides the 486 state classes three ways: the many
 # one-bit kinds (a bare active bit), a handful whose one-bit entry carries its own state-data bits
-# (BooleanSwitch, Stack, the sender class; statescript.DATA_STATES writes them), and three
-# has-data classes whose entry is preceded by a second bit. Until owner_full_frame gains that
-# second-bit form, the has-data classes stay out of the snapshot: no widget they own can run,
-# which shows as a still-empty spot on the HUD rather than as a desync of the whole frame.
+# (BooleanSwitch, Stack, the sender class; statescript.DATA_STATES writes them), and three classes
+# whose entry is has-data + active + state data (statescript.HAS_DATA_STATES has their builders,
+# statescript.HasData is the entry form). The unnamed third class (0x691BFA55) has no builder yet:
+# its data reader has not been read, so its states stay unentered - an entry without a mask bit
+# consumes nothing, which cannot shift the frame.
 HAS_DATA_STATES = {
     "STUStatescriptStateLogicalButton",
     "STUStatescriptStateWeaponVolley",
@@ -74,7 +77,9 @@ def _subscript_target(node) -> int | None:
 
 
 def body_instances(
-    body_guid: int, allow: set[str] | None = None
+    body_guid: int,
+    allow: set[str] | None = None,
+    entries: dict[tuple[int, int], statescript.HasData] | None = None,
 ) -> tuple[list, dict]:
     """The body's initial graphs as (instances, entity vars) for an owner full frame.
 
@@ -125,7 +130,11 @@ def body_instances(
                 if child:
                     active[slot] = statescript.subscript(child)
             elif node.cls in HAS_DATA_STATES:
-                continue  # needs the two-bit has-data form; a bare bit desyncs the snapshot
+                # The two-bit classes stay out of the static picture: a volley that starts at
+                # spawn fires and never ends (callers move it through `entries` instead), and
+                # 0x691BFA55 has no data reader yet. An entry without a mask bit consumes
+                # nothing, so leaving them out cannot shift the frame.
+                continue
             elif not _allowed(node.cls, allow):
                 continue  # outside the allow-list: not activated, no entry in the mask
             elif node.cls in statescript.DATA_STATES:
@@ -133,6 +142,9 @@ def body_instances(
             else:
                 active[slot] = None  # the one-bit form; the Entry chain a server instance skips
                 # would have run these states up (statescript.py)
+        for (want, want_slot), value in (entries or {}).items():
+            if want == index and want_slot < len(g.owner_states()):
+                active[want_slot] = value
         instances.append(
             statescript.Instance(
                 index,
@@ -144,12 +156,36 @@ def body_instances(
     return instances, entity_vars
 
 
+def volley_target(body_guid: int) -> tuple[int, int] | None:
+    """The body's primary WeaponVolley state as (instance index, owner state slot): the first volley
+    in the body's graph order - which is the rifle for Soldier: 76, Ana's and every gun hero whose
+    weapons script the state first. The firing frames light exactly this entry."""
+    record = graph.bodies().get(body_guid)
+    if record is None:
+        return None
+    for index, entry in enumerate(record["graphs"], start=1):
+        if entry["graph"] is None or entry["graph"] in DROP_GRAPHS:
+            continue
+        g = graph.graph(entry["graph"])
+        if g is None:
+            continue
+        for slot, node in enumerate(g.owner_states()):
+            if node.cls == "STUStatescriptStateWeaponVolley":
+                return index, slot
+    return None
+
+
 def body_frame(
-    body_guid: int, cmfd: int, lbss: int | None = None, allow: set[str] | None = None
+    body_guid: int,
+    cmfd: int,
+    lbss: int | None = None,
+    allow: set[str] | None = None,
+    entries: dict[tuple[int, int], statescript.HasData] | None = None,
 ):
     """The owner full frame of the body's scripts, None for a body the data does not describe.
-    `cmfd` must exceed the last CmFD sent to this entity, as any owner frame does."""
-    instances, entity_vars = body_instances(body_guid, allow)
+    `cmfd` must exceed the last CmFD sent to this entity, as any owner frame does. `entries`
+    lights or stops two-bit states on top of the static picture, keyed (instance, state slot)."""
+    instances, entity_vars = body_instances(body_guid, allow, entries)
     if not instances:
         return None
     return statescript.owner_full_frame(cmfd, instances, entity_vars, lbss)
@@ -166,10 +202,13 @@ def body_graph_chunk(body_guid: int, allow: set[str] | None = None):
 
 
 def body_full_chunk(
-    body_guid: int, cmfd: int, allow: set[str] | None = None
+    body_guid: int,
+    cmfd: int,
+    allow: set[str] | None = None,
+    entries: dict[tuple[int, int], statescript.HasData] | None = None,
 ):
     """The second record: the activating full snapshot, wrapped at base 0 (last frame 2, so it
     stays above the create's graph-info frame and cannot queue-stall). The same blob wrapped at a
     numbered base is ignored: a full frame at base 0 is what resets and creates the instances."""
-    frame = body_frame(body_guid, cmfd, allow=allow)
+    frame = body_frame(body_guid, cmfd, allow=allow, entries=entries)
     return None if frame is None else statescript.chunk(frame, 0, 3)

@@ -60,6 +60,23 @@ class LoadoutTests(unittest.TestCase):
         # controller's frames (see heroselect), and the body snapshot must not invent them here
         self.assertNotIn(17906, entity_vars)
 
+    def test_the_volley_target_points_at_the_gun(self):
+        # The firing frames address the body's first WeaponVolley state by (instance, slot):
+        # Soldier: 76 keeps it in his weapons graph, the sixth of the nine.
+        hero = next(h for h in heroes().values() if h.name == "Soldier: 76")
+        self.assertEqual(loadout.volley_target(hero.body), (6, 1))
+        self.assertIsNone(loadout.volley_target(0))
+
+    def test_a_volley_entry_grows_the_frame_by_exactly_its_form(self):
+        # Baseline: the state is one off-bit. The volley frame: has-data + active + the 18 bits.
+        hero = next(h for h in heroes().values() if h.name == "Soldier: 76")
+        base = loadout.body_full_chunk(hero.body, 9, allow=loadout.SHIP_STATES).count
+        volley = loadout.body_full_chunk(
+            hero.body, 9, allow=loadout.SHIP_STATES,
+            entries={(6, 1): statescript.HasData(statescript.volley_data())},
+        ).count
+        self.assertEqual(volley, base + 19)  # +2 for the two-bit entry, +18 data, -1 off bit
+
     def test_the_state_allow_list_keeps_structure_and_shrinks_the_picture(self):
         # The shipped allow-list keeps every graph and launcher and drops a few state payloads: the
         # same body picture, minus the classes whose begin actions need encoders that are not here yet.

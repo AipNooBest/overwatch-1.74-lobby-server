@@ -138,24 +138,71 @@ def sender_data() -> BitWriter:
     return out
 
 
-# The state-data forms of the active states in a full snapshot (the native predicate over the graph
-# metadata's state types): three classes take a two-bit has-data form (LogicalButton 0xb480a974,
-# WeaponVolley 0xeed6d952, 0x691bfa55), three take a bare active bit plus a small payload - the
-# BooleanSwitch's branch bit, the Stack's two bits and the sender's compact u16 below. Everything
-# else needs no data bits.
+def volley_data(start_time: int = 0) -> BitWriter:
+    """The state data of a WeaponVolley entry (reader 0xd60400): the start time as a sign-magnitude
+    int - sign bit, then a varint width (one 0 bit means 8, 1-0 means 16, 1-1 means 32) and the
+    value - a flag (a second int follows when set), a flag (a part follows when set) and six more
+    bits. A zero start is 18 bits and is the form the live firing runs sent. The data belongs to
+    the has-data bit, not to the active bit: a stopped volley must send it as well, or the frame
+    tail shifts."""
+    out = BitWriter()
+    out.bit(0)  # sign
+    out.w_var(start_time)
+    out.bit(0)  # no second int
+    out.bit(0)  # no part
+    out.bits(0, 6)
+    return out
+
+
+def button_data(count: int = 0) -> BitWriter:
+    """The state data of a LogicalButton entry: a 4-bit press counter."""
+    out = BitWriter()
+    out.bits(count & 0xF, 4)
+    return out
+
+
+@dataclass(frozen=True)
+class HasData:
+    """A state entry of a class whose form is has-data + active + state data (WeaponVolley,
+    LogicalButton; see DATA_STATES below and loadout.HAS_DATA_STATES). The payload is read by
+    the client whenever has-data is set, active or not, so stopping such a state means sending
+    it again inactive, not dropping the entry."""
+
+    payload: BitWriter
+    active: bool = True
+
+
+# The state-data forms of the entries in a full snapshot (the native predicate over the graph
+# metadata's state types): three classes take the two-bit has-data form, with Volley and Button
+# described by the builders here and the unnamed third one (0x691bfa55) still without a reader -
+# the loadout leaves its states out of the picture. Three classes take a bare active bit plus a
+# small payload - the BooleanSwitch's branch bit, the Stack's two bits and the sender's compact
+# u16 below. Everything else needs no data bits.
 DATA_STATES = {
     "STUStatescriptStateBooleanSwitch": switch_data,
     "STUStatescriptStateStack": stack_data,
     "STUStatescriptStateGameMessageEntry": sender_data,
 }
 
+HAS_DATA_STATES = {
+    "STUStatescriptStateWeaponVolley": volley_data,
+    "STUStatescriptStateLogicalButton": button_data,
+    "STU_691BFA55": None,  # the form is has-data + active + data; the data reader is not read yet
+}
+
 
 def active_data(cls: str):
-    """The state-data payload this class needs when active, or None when the bare bit is enough.
-    The has-data classes cannot be sent by this encoder yet: their form also flips a leading bit,
-    which owner_full_frame only knows for the SubScript launcher. Callers must leave those states
-    off (the loadout's skip list filters them) until a general (has-data, payload) form lands."""
+    """The state-data payload builder this class needs when active, or None when the bare bit is
+    enough for it. The has-data classes take the entry form HasData(payload) instead - see
+    HAS_DATA_STATES for which builder belongs to which class."""
     return DATA_STATES.get(cls)
+
+
+def has_data_entry(cls: str, **fields):
+    """The HasData entry for a two-bit class, built with the class's own payload (start_time for
+    a volley, count for a button), or None for a class without a known two-bit form."""
+    builder = HAS_DATA_STATES.get(cls)
+    return None if builder is None else HasData(builder(**fields))
 
 
 @dataclass
@@ -227,11 +274,16 @@ def owner_full_frame(
         else:
             out.bit(0)
         for bit in range(instance.graph.owner_states):
-            on = bit in instance.active
-            out.bit(on)
-            payload = instance.active.get(bit)
-            if on and payload is not None:
-                out.append(payload)
+            entry = instance.active.get(bit)
+            if isinstance(entry, HasData):
+                out.bit(1)  # has-data
+                out.bit(entry.active)
+                out.append(entry.payload)  # read whenever has-data is set, active or not
+            else:
+                on = bit in instance.active
+                out.bit(on)
+                if on and entry is not None:
+                    out.append(entry)
         out.bits(0b11, 2)  # the instance's event list ends (code 3)
     out.bits(0, 2)  # the frame's event lists: none
     return out

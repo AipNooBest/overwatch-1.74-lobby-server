@@ -12,9 +12,11 @@ from ow174.game.statescript import (
     DATA_STATES,
     Bool,
     Graph,
+    HasData,
     Instance,
     Stream,
     active_data,
+    button_data,
     chunk,
     graph_create_frame,
     owner_ack,
@@ -22,6 +24,7 @@ from ow174.game.statescript import (
     sender_data,
     stack_data,
     switch_data,
+    volley_data,
 )
 from ow174.game.world import EntityUpdate, _write_entity
 
@@ -143,6 +146,43 @@ class StatescriptTests(unittest.TestCase):
         self.assertEqual(stream.next_cmfd(100), 108)
         self.assertEqual(stream.next_cmfd(105), 113)  # max(108 + 1, 105 + 8)
         self.assertEqual(stream.next_cmfd(0), 114)  # monotonic even when the client falls behind
+
+    def test_the_two_bit_forms(self):
+        # WeaponVolley: sign, varint width (0 = 8 bits), value, two flags and six bits. A zero
+        # start is exactly 18 bits, the form the live firing sent. LogicalButton: a 4-bit counter.
+        self.assertEqual(bitstring(volley_data()), "0" + "0" + "00000000" + "0" + "0" + "000000")
+        self.assertEqual(volley_data().count, 18)
+        self.assertEqual(volley_data(5).count, 18)
+        self.assertEqual(bitstring(button_data(3)), "1100")
+        self.assertEqual(button_data().count, 4)
+        volley = owner_full_frame(
+            9, [Instance(1, Graph(0x0257, 4, 0), active={1: HasData(volley_data(3))})], {}
+        )
+        bits = bitstring(volley)
+        # header 12 (lead/H/C + the 9-bit varint of CmFD 9), instance step 5, descriptor 20 (graph
+        # 16 bits, entity, flag, no parent, no refs), list end 5, no entity vars 1, no presence
+        # bits, no extras bit: at 45 comes the volley entry (has-data, active, the 18 data bits),
+        # then the two states off after it and the instance and frame event ends
+        self.assertEqual(bits[45:65], "11" + bitstring(volley_data(3)))
+        self.assertEqual(bits[65:], "00" + "11" + "00")
+        self.assertEqual(volley.count, 71)
+
+    def test_an_inactive_two_bit_entry_still_carries_its_data(self):
+        # The client calls the class's data reader on the has-data bit, not on the active bit: an
+        # entry stopping a volley must still send the payload, or the whole frame tail shifts.
+        active = owner_full_frame(
+            9, [Instance(1, Graph(0x0257, 1, 0), active={0: HasData(volley_data())})], {}
+        )
+        stopped = owner_full_frame(
+            9,
+            [Instance(1, Graph(0x0257, 1, 0), active={0: HasData(volley_data(), active=False)})],
+            {},
+        )
+        self.assertEqual(active.count, stopped.count)  # the payload is there in both
+        bits = bitstring(stopped)
+        self.assertEqual(bits[44], "1")  # has-data (the only state, so the entry starts at 44)
+        self.assertEqual(bits[45], "0")  # active: no
+        self.assertEqual(bits[46:64], bitstring(volley_data()))  # and the data is read anyway
 
 
 if __name__ == "__main__":

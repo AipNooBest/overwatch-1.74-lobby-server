@@ -29,7 +29,7 @@ from ow174.game import heroselect, loadout, world
 from ow174.game.commands import Command, CommandQueue
 from ow174.game.content import SOLDIER, GameMap, Hero, heroes, spawn_point
 from ow174.game.mover import FlatMover
-from ow174.game.statescript import Float, Stream, owner_ack, variables_frame
+from ow174.game.statescript import Float, HasData, Stream, owner_ack, variables_frame, volley_data
 from ow174.game.world import (
     OP_CREATE,
     OP_DESTROY,
@@ -118,6 +118,13 @@ class Player:
         self.body_script: Stream | None = None
         self.body_full_next = 0.0
         self.body_full_sends = 0
+        # The gun, lit by the fire button: (instance, state) of the body's WeaponVolley and the
+        # volley's on/off edges (a volley must be sent off again - see loadout.volley_data).
+        self.volley: tuple[int, int] | None = None
+        self.fire_pending = False
+        self.fire_last = False
+        self.volley_on = False
+        self.volley_off_at = 0.0
         self.mode_script = Stream(GAME_MODE_ENTITY)  # the game mode entity's variables: the countdown
         self.next_countdown = 0.0
         self.select_open = True
@@ -132,11 +139,16 @@ class Player:
         return Movement(mover.position, mover.yaw, mover.pitch, mover.velocity, flags)
 
     def take_commands(self, commands: list[Command]) -> None:
-        """Move the server's copy of the body. Without a body the client moves nothing either."""
+        """Move the server's copy of the body. Without a body the client moves nothing either. A
+        fresh press of the fire button arms the volley (Match.update lights the state)."""
         seconds = self.quanta / 1e6
         for command in self.commands.new(commands):
             if self.has_body:
                 self.mover.step(command, seconds)
+                fire = bool(command.buttons & 1)
+                if fire and not self.fire_last:
+                    self.fire_pending = True
+                self.fire_last = fire
 
     def new_body(self) -> None:
         """The next body id, at the spawn point: the server's flat mover is not exact enough to put a
@@ -147,6 +159,11 @@ class Player:
         self.body_script = None
         self.body_full_next = 0.0
         self.body_full_sends = 0
+        self.volley = None
+        self.fire_pending = False
+        self.fire_last = False
+        self.volley_on = False
+        self.volley_off_at = 0.0
         self.mover = FlatMover(self.spawn[0], _yaw_units(self.spawn[1]))
 
     def describe(self) -> str:
@@ -271,6 +288,7 @@ class Match:
                 viewer.body_script.last = 1
                 viewer.body_script.data_last = 1
                 viewer.body_full_next = self.now + 0.5
+                viewer.volley = loadout.volley_target(viewer.hero.body)  # the gun to light on fire
         return [
             EntityUpdate(
                 viewer.body, OP_CREATE, lambda origin: self._body_create(origin, viewer, state), state,
@@ -368,6 +386,13 @@ class Match:
                 # applied is dropped there, so a resend after a lost packet is safe (see
                 # _body_snapshot)
                 self._body_snapshot(player, now)
+            if stream is not None and stream.delivered >= 3 and stream.last >= 3:
+                # the snapshot is on the client: the gun may answer the fire button
+                if player.volley is not None and player.fire_pending and not player.volley_on:
+                    player.fire_pending = False
+                    self._volley(player, now, on=True)
+                elif player.volley_on and now >= player.volley_off_at:
+                    self._volley(player, now, on=False)
             if stream is not None and stream.data_last and now >= stream.next_ack:
                 self._owner_ack(player, stream, now)
             if self.assembling() and player.steps_done >= 4 and now >= player.next_countdown:
@@ -456,26 +481,42 @@ class Match:
         cmfd = stream.next_cmfd(self._newest_frame(player))
         player.client.queue_entities([stream.ack_delta(owner_ack(cmfd))])
 
-    def _body_snapshot(self, player: Player, now: float) -> None:
+    def _body_snapshot(self, player: Player, now: float, entries=None) -> None:
         """The hero's full snapshot, the second record of the body's statescript: wrapped at base 0
         with CmFD above the client's tick stamp (Stream.next_cmfd), in its own datagram. The one
         shape the client accepts: the create's graph-info frame only lifts the manager over the
         tick, and this frame creates the instances and sets the states. The client drops a chunk at
-        or below the highest frame it applied, so the retry below is safe after a lost packet."""
+        or below the highest frame it applied, so the retry below is safe after a lost packet.
+        `entries` patches two-bit states (the volley) on top of the static picture; every such
+        frame must carry the entry's state data, active or not."""
         cmfd = player.body_script.next_cmfd(self._newest_frame(player))
-        chunk = loadout.body_full_chunk(player.hero.body, cmfd, allow=self.hero_states)
+        chunk = loadout.body_full_chunk(player.hero.body, cmfd, allow=self.hero_states, entries=entries)
         if chunk is None:
             return
+        last = max(player.body_script.last + 1, 3)
         update = EntityUpdate(player.body, chunk=chunk)
-        update.chunk_last = 3
+        update.chunk_last = last
         update.stream = player.body_script
         update.resend = False
-        player.body_script.last = 3
-        player.body_script.data_last = 3
+        player.body_script.last = last
+        player.body_script.data_last = max(player.body_script.data_last, last)
         player.client.queue_entities([update])
         player.body_full_sends += 1
         player.body_full_next = now + 1.0
         log.info("[game] %s: %s's body snapshot sent, cmfd %d", self.label(), player.name, cmfd)
+
+    VOLLEY_SECONDS = 0.25  # the vendor's live pulse: volley on, then off about 250 ms later
+
+    def _volley(self, player: Player, now: float, on: bool) -> None:
+        """One volley frame of the body's WeaponVolley state: on, a full snapshot lights the state
+        with its state data; off, the same entry goes out inactive - and still carries the data,
+        because the client reads it whenever the has-data bit is set."""
+        entry = HasData(volley_data(self._newest_frame(player) & 0xFF), active=on)
+        self._body_snapshot(player, now, entries={player.volley: entry})
+        player.volley_on = on
+        player.volley_off_at = now + self.VOLLEY_SECONDS if on else 0.0
+        log.info("[game] %s: %s's volley %s at frame %d", self.label(), player.name,
+                 "lit" if on else "stopped", self._newest_frame(player))
 
     def game_message(self, player: Player, value: dict, now: float) -> None:
         """21616: a game message a statescript action sends to the server, such as a hero pick."""
