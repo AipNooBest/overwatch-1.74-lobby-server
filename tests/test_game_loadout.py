@@ -1,0 +1,88 @@
+"""Hero body scripts: the frames a fresh body gets, at the sizes the live client accepted."""
+
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from ow174.game import loadout, statescript
+from ow174.game.content import heroes
+
+
+def bitstring(bits: statescript.BitWriter) -> str:
+    return "".join(str((bits.value >> k) & 1) for k in range(bits.count))
+
+
+def bytewise(bits) -> int:
+    return (bits.count + 7) // 8
+
+
+class LoadoutTests(unittest.TestCase):
+    def setUp(self):
+        self.saved = loadout.ALLOW_STATES
+
+    def tearDown(self):
+        loadout.ALLOW_STATES = self.saved
+
+    def test_every_described_body_builds_the_pair_of_chunks(self):
+        for body in sorted(loadout.graph.bodies()):
+            create = loadout.body_graph_chunk(body)
+            full = loadout.body_full_chunk(body, 9)
+            self.assertIsNotNone(create, f"body {body:016X}")
+            self.assertIsNotNone(full, f"body {body:016X}")
+            self.assertLess(create.count, full.count)  # the empty frame is a prefix step, not the picture
+
+    def test_the_create_chunk_carries_no_instances(self):
+        # The create record is the empty graph-info frame in a base-1 chunk: header, size varint,
+        # lead/H/C and CmFD 0, then only the empty instance list - 56 bits of nothing but structure.
+        create = loadout.body_graph_chunk(0x0400000000002593)  # Echo
+        self.assertEqual(create.count, 56)
+        self.assertEqual(
+            bitstring(create),
+            "01000000000000000010000000000010100001000000000000000000",
+        )
+
+    def test_hero_frames_are_the_sizes_the_live_run_proved(self):
+        # Measured on the accepted live frames: instance counts, entity vars and the full snapshot's
+        # bit size per hero body (the numbers a regression to the encoder must not change).
+        loadout.ALLOW_STATES = None
+        expected = {
+            "Echo": (8, 6, 1063, 1108),
+            "Genji": (8, 7, 1049, 1094),
+            "Soldier: 76": (9, 4, 823, 868),
+            "Wrecking Ball": (10, 9, 1327, 1372),
+        }
+        for name, (graphs, evars, frame_bits, full_bits) in expected.items():
+            hero = next(h for h in heroes().values() if h.name == name)
+            instances, entity_vars = loadout.body_instances(hero.body)
+            self.assertEqual(len(instances), graphs, name)
+            self.assertEqual(len(entity_vars), evars, name)
+            self.assertEqual(loadout.body_frame(hero.body, 1).count, frame_bits, name)
+            self.assertEqual(loadout.body_full_chunk(hero.body, 9).count, full_bits, name)
+
+    def test_the_hero_asset_and_the_hud_gates_ride_the_entity_block(self):
+        hero = next(h for h in heroes().values() if h.name == "Echo")
+        _, entity_vars = loadout.body_instances(hero.body)
+        asset = entity_vars[0x03AC]  # every StateHero reads this; a null guid and the client exits
+        self.assertIsInstance(asset, statescript.Asset)
+        self.assertEqual(asset.guid, hero.guid)
+        # no hero body in the data carries 20E4: the HUD's begin-condition vars belong to the
+        # controller's frames (see heroselect), and the body snapshot must not invent them here
+        self.assertNotIn(17906, entity_vars)
+
+    def test_the_state_allow_list_keeps_structure_and_shrinks_the_picture(self):
+        loadout.ALLOW_STATES = {"HealthPool", "BooleanSwitch", "Stack", "Wait", "UXPresenter"}
+        instances, entity_vars = loadout.body_instances(0x0400000000002593)
+        self.assertEqual(len(instances), 8)  # the graphs stay: launchers and gates are structure
+        self.assertEqual(len(entity_vars), 6)
+        self.assertEqual(loadout.body_frame(0x0400000000002593, 1).count, 1058)  # 5 bits less
+        launchers = [
+            slot for instance in instances for slot in instance.active
+            if instance.graph.index != statescript.HUD.index
+        ]
+        self.assertTrue(launchers)  # the SubScript launchers remain on
+
+
+if __name__ == "__main__":
+    unittest.main()
