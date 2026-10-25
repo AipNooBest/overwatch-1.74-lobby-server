@@ -113,6 +113,51 @@ def subscript(child: int) -> BitWriter:
     return out
 
 
+def switch_data(branch: int = 0) -> BitWriter:
+    """The state data of an active BooleanSwitch: one branch bit (the reader at 0xa099e0). A bare
+    active bit is not enough: the client then parses the following instance's data as states and the
+    whole frame tail shifts."""
+    out = BitWriter()
+    out.bit(branch)
+    return out
+
+
+def stack_data() -> BitWriter:
+    """The state data of an active Stack: two bits (the value they encode is 0). Like
+    switch_data, the bare active bit desyncs the frame."""
+    out = BitWriter()
+    out.bits(0, 2)
+    return out
+
+
+def sender_data() -> BitWriter:
+    """The state data of an active GameMessageEntry (the sender class): a compact u16 follows the
+    active bit, whose zero form is one 0 bit."""
+    out = BitWriter()
+    out.bit(0)
+    return out
+
+
+# The state-data forms of the active states in a full snapshot (the native predicate over the graph
+# metadata's state types): three classes take a two-bit has-data form (LogicalButton 0xb480a974,
+# WeaponVolley 0xeed6d952, 0x691bfa55), three take a bare active bit plus a small payload - the
+# BooleanSwitch's branch bit, the Stack's two bits and the sender's compact u16 below. Everything
+# else needs no data bits.
+DATA_STATES = {
+    "STUStatescriptStateBooleanSwitch": switch_data,
+    "STUStatescriptStateStack": stack_data,
+    "STUStatescriptStateGameMessageEntry": sender_data,
+}
+
+
+def active_data(cls: str):
+    """The state-data payload this class needs when active, or None when the bare bit is enough.
+    The has-data classes cannot be sent by this encoder yet: their form also flips a leading bit,
+    which owner_full_frame only knows for the SubScript launcher. Callers must leave those states
+    off (the loadout's skip list filters them) until a general (has-data, payload) form lands."""
+    return DATA_STATES.get(cls)
+
+
 @dataclass
 class Instance:
     index: int
@@ -143,8 +188,13 @@ def _variables(out: BitWriter, variables: dict[int, Value]) -> None:
     out.w_var(0)
 
 
-def owner_full_frame(cmfd: int, instances: list[Instance], entity_vars: dict[int, Value]) -> BitWriter:
-    """An owner (H=1) full frame. `cmfd` must be larger than any CmFD sent to this entity before."""
+def owner_full_frame(
+    cmfd: int, instances: list[Instance], entity_vars: dict[int, Value], lbss: int | None = None
+) -> BitWriter:
+    """An owner (H=1) full frame. `cmfd` must be larger than any CmFD sent to this entity before.
+    `lbss` (the "bits to skip if this frame was already applied" varint) is required when the frame
+    is wrapped in a chunk at a non-zero base: a chunk below the manager's last applied frame must
+    say how far to jump over the body, and without it the skip lands mid-frame."""
     if cmfd < 1:
         raise ValueError("CmFD 0 is always stale")
     out = BitWriter()
@@ -152,6 +202,8 @@ def owner_full_frame(cmfd: int, instances: list[Instance], entity_vars: dict[int
     out.bit(1)  # H
     out.bit(0)  # C
     out.w_var(cmfd)
+    if lbss is not None:
+        out.w_var(lbss)
     last = 0
     for instance in sorted(instances, key=lambda item: item.index):
         out.w_u16(instance.index - last)
@@ -182,6 +234,28 @@ def owner_full_frame(cmfd: int, instances: list[Instance], entity_vars: dict[int
                 out.append(payload)
         out.bits(0b11, 2)  # the instance's event list ends (code 3)
     out.bits(0, 2)  # the frame's event lists: none
+    return out
+
+
+def graph_create_frame(instances: list[Instance]) -> BitWriter:
+    """The graph-info frame that rides an entity's create: the instance list with plain create
+    descriptors, no variables, no states, CmFD 0 (the interpreter takes the client's own tick). It
+    only creates the instances; the states and variables go in the owner full snapshot that follows.
+    Listing states here too creates them twice, and an instance the create frame does not mention is
+    not created by the later snapshot."""
+    out = BitWriter()
+    out.bit(0)  # lead
+    out.bit(1)  # H
+    out.bit(0)  # C
+    out.w_var(0)  # no CmFD: the client tick is stored as the base
+    last = 0
+    for instance in sorted(instances, key=lambda item: item.index):
+        out.w_u16(instance.index - last)
+        last = instance.index
+        _descriptor(out, instance)
+    out.w_u16(0)
+    out.bit(0)  # no entity variables
+    out.bits(0, 2)  # no frame events
     return out
 
 
@@ -243,8 +317,11 @@ class Stream:
         self.next_ack = 0.0  # when the next ack-only delta may go
 
     def next_cmfd(self, newest: int) -> int:
-        """The client skips an owner frame whose CmFD is not larger than the last one."""
-        self.cmfd = max(newest, self.cmfd + 1)
+        """The client skips an owner frame whose CmFD is not larger than the last one, and the
+        interpreter requires it to exceed the tick stamp the graph-create frame left (set to the
+        client's own tick): frames numbered below that tick leave the game "waiting for updates
+        that never came". The working rule is therefore CmFD = max(prev + 1, newest + 8)."""
+        self.cmfd = max(self.cmfd + 1, newest + 8)
         return self.cmfd
 
     @property

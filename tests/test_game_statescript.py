@@ -8,7 +8,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ow174.game import heroselect
 from ow174.game.bits import BitWriter
-from ow174.game.statescript import Graph, Instance, chunk, owner_ack, owner_full_frame
+from ow174.game.statescript import (
+    DATA_STATES,
+    Bool,
+    Graph,
+    Instance,
+    Stream,
+    active_data,
+    chunk,
+    graph_create_frame,
+    owner_ack,
+    owner_full_frame,
+    sender_data,
+    stack_data,
+    switch_data,
+)
 from ow174.game.world import EntityUpdate, _write_entity
 
 
@@ -72,6 +86,63 @@ class StatescriptTests(unittest.TestCase):
         self.assertIsNone(heroselect.picked_hero(bytes(20)))
         self.assertTrue(heroselect.wanted_open(bytes.fromhex("01 c3 a2 05 01 01") + bytes(8)))
         self.assertFalse(heroselect.wanted_open(bytes.fromhex("01 c3 a2 05 01 00") + bytes(8)))
+
+    def test_state_data_payloads_of_the_three_small_forms(self):
+        # A live BooleanSwitch carries its branch bit, a Stack two zero bits, the sender class one
+        # bit (the zero form of its compact u16). Without them the client shifts the frame tail.
+        self.assertEqual(bitstring(switch_data()), "0")
+        self.assertEqual(bitstring(switch_data(1)), "1")
+        self.assertEqual(bitstring(stack_data()), "00")
+        self.assertEqual(bitstring(sender_data()), "0")
+        self.assertIs(active_data("STUStatescriptStateBooleanSwitch"), switch_data)
+        self.assertIs(active_data("STUStatescriptStateStack"), stack_data)
+        self.assertIs(active_data("STUStatescriptStateGameMessageEntry"), sender_data)
+        self.assertIsNone(active_data("STUStatescriptStateWait"))
+        self.assertEqual(len(DATA_STATES), 3)
+
+    def test_a_create_frame_carries_only_descriptors(self):
+        # The graph-info frame riding a body create: CmFD 0 (the client's own tick becomes the base),
+        # plain descriptors, and nothing else. States and variables follow in the full snapshot.
+        body = Graph(0x13C1, 43, 12)
+        instances = [
+            Instance(1, body, parent=(0, 41), active={0: switch_data(1), 1: stack_data()}),
+            Instance(3, Graph(0x20E4, 1, 0)),
+        ]
+        frame = graph_create_frame(instances)
+        self.assertEqual(
+            bitstring(frame),
+            "0100000000000100010000011110010000010000000000100101000001000010011100000100000000000000",
+        )
+        self.assertEqual(frame.count, 88)
+
+    def test_an_owner_frame_may_carry_lbss_for_a_wrapped_chunk(self):
+        # The same frame as test_a_create_frame, complete: CmFD 9, one entity variable, the switch's
+        # branch bit and the stack's two bits on instance 1, no states on the HUD instance.
+        body = Graph(0x13C1, 43, 12)
+        instances = [
+            Instance(1, body, parent=(0, 41), active={0: switch_data(1), 1: stack_data()}),
+            Instance(3, Graph(0x20E4, 1, 0)),
+        ]
+        frame = owner_full_frame(9, instances, {7: Bool(True)})
+        self.assertEqual(frame.count, 177)
+        self.assertEqual(
+            bitstring(frame),
+            "010010010000010001000001111001000001000000000010010100000100"
+            "001001110000010000000000010111000000000100000000000000000000"
+            "000111000000000000000000000000000000000000000000011001100",
+        )
+        wrapped = owner_full_frame(9, instances, {7: Bool(True)}, lbss=150)
+        self.assertEqual(wrapped.count, 186)  # 177 + the varint of 150: one selector bit and 8 bits
+        self.assertEqual(bitstring(wrapped)[:13], bitstring(frame)[:13])
+        self.assertEqual(bitstring(wrapped)[22:], bitstring(frame)[13:])
+
+    def test_the_cmfd_stays_ahead_of_the_client_tick_by_eight(self):
+        # Frames numbered at or below the manager's tick stamp are dropped with "waiting for updates
+        # that never came", so every owner frame goes out at least 8 ahead of the newest command.
+        stream = Stream(0xA0000100)
+        self.assertEqual(stream.next_cmfd(100), 108)
+        self.assertEqual(stream.next_cmfd(105), 113)  # max(108 + 1, 105 + 8)
+        self.assertEqual(stream.next_cmfd(0), 114)  # monotonic even when the client falls behind
 
 
 if __name__ == "__main__":
