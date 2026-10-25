@@ -227,7 +227,12 @@ class LobbyServer:
             on_leave=self.game_left,
             skin_of=self.skin_of,
             hero_scripts=self.settings.hero_scripts,
-            hero_states=set(self.settings.hero_states) or None,
+            # --hero-states all: an empty set asks the game server for every class the encoder has
+            hero_states=(
+                set()
+                if self.settings.hero_states == ("all",)
+                else set(self.settings.hero_states) or None
+            ),
         )
         game.start()
         self.game = game

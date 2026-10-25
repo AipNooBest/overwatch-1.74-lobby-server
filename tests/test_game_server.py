@@ -229,16 +229,18 @@ class ScriptedBodySequenceTests(unittest.TestCase):
 
     def test_the_create_carries_the_empty_graph_info_chunk(self):
         match, player = self.scripted()
-        (body,) = match.own_body_updates(player)
+        body, ui = match.own_body_updates(player)  # the body and the world's UI entity
         self.assertEqual(body.chunk.count, 56)  # the empty graph-info frame, wrapped
         self.assertEqual(player.body_script.last, 1)
         self.assertEqual(player.body_script.data_last, 1)
+        self.assertEqual(ui.entity, 0x00000000000063F1)  # the UI definition's entity
+        self.assertEqual(match.ui_script.last, 1)
 
     def test_the_snapshot_follows_as_its_own_record(self):
         match, player = self.scripted()
         match.own_body_updates(player)
         match.update(0.6, 1000)  # half a second later, one tick after the create
-        (snapshot,) = [u for u in player.client.entities if u.chunk is not None]
+        snapshot, hud = [u for u in player.client.entities if u.chunk is not None]
         self.assertEqual(snapshot.chunk_last, 3)
         self.assertEqual(player.body_script.last, 3)
         self.assertEqual(player.body_script.cmfd, 1008)  # max(prev + 1, command frame 1000 + 8)
@@ -246,6 +248,9 @@ class ScriptedBodySequenceTests(unittest.TestCase):
         self.assertFalse(bits.bit())  # w_u32(0): the small form, the snapshot is wrapped at base 0
         self.assertEqual(bits.bits(16), 0)
         self.assertEqual(snapshot.entity, player.body)
+        self.assertEqual(hud.entity, match.ui_script.entity)  # the HUD's snapshot rides the same rule
+        self.assertEqual(hud.chunk_last, 3)
+        self.assertEqual(match.ui_sends, 1)
 
     def test_retries_stop_after_three_sends(self):
         match, player = self.scripted()

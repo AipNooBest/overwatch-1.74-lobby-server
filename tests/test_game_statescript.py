@@ -16,8 +16,10 @@ from ow174.game.statescript import (
     Instance,
     Stream,
     active_data,
+    anim_data,
     button_data,
     chunk,
+    expiry_data,
     graph_create_frame,
     owner_ack,
     owner_full_frame,
@@ -90,9 +92,10 @@ class StatescriptTests(unittest.TestCase):
         self.assertTrue(heroselect.wanted_open(bytes.fromhex("01 c3 a2 05 01 01") + bytes(8)))
         self.assertFalse(heroselect.wanted_open(bytes.fromhex("01 c3 a2 05 01 00") + bytes(8)))
 
-    def test_state_data_payloads_of_the_three_small_forms(self):
+    def test_state_data_payloads_of_the_small_one_bit_forms(self):
         # A live BooleanSwitch carries its branch bit, a Stack two zero bits, the sender class one
-        # bit (the zero form of its compact u16). Without them the client shifts the frame tail.
+        # bit (the zero form of its compact u16) and an Anim five (no reference, field, gate).
+        # Without them the client shifts the frame tail.
         self.assertEqual(bitstring(switch_data()), "0")
         self.assertEqual(bitstring(switch_data(1)), "1")
         self.assertEqual(bitstring(stack_data()), "00")
@@ -100,8 +103,9 @@ class StatescriptTests(unittest.TestCase):
         self.assertIs(active_data("STUStatescriptStateBooleanSwitch"), switch_data)
         self.assertIs(active_data("STUStatescriptStateStack"), stack_data)
         self.assertIs(active_data("STUStatescriptStateGameMessageEntry"), sender_data)
+        self.assertIs(active_data("STUStatescriptStateAnim"), anim_data)
         self.assertIsNone(active_data("STUStatescriptStateWait"))
-        self.assertEqual(len(DATA_STATES), 3)
+        self.assertEqual(len(DATA_STATES), 4)
 
     def test_a_create_frame_carries_only_descriptors(self):
         # The graph-info frame riding a body create: CmFD 0 (the client's own tick becomes the base),
@@ -155,6 +159,20 @@ class StatescriptTests(unittest.TestCase):
         self.assertEqual(volley_data(5).count, 18)
         self.assertEqual(bitstring(button_data(3)), "1100")
         self.assertEqual(button_data().count, 4)
+        # 0x691BFA55 (the reader stores frame - delay as the state's expiry tick): one
+        # sign-magnitude int - sign, varint width, value. Zero delay is ten bits.
+        self.assertEqual(bitstring(expiry_data()), "0" + "0" + "00000000")
+        self.assertEqual(expiry_data().count, 10)
+        self.assertEqual(expiry_data(0x7FFFFFFF).count, 35)  # sign + 2-bit selector + 32 bits
+        # Anim (0xcbd370): optional reference (present, varint instance id 4/8/16 bits, a state
+        # index of the graph's stored width), a 3-bit field, a gate bit. The no-reference form -
+        # the one a static picture sends - is five bits and plays nothing.
+        self.assertEqual(bitstring(anim_data()), "0" + "000" + "0")
+        self.assertEqual(anim_data().count, 5)
+        self.assertEqual(
+            bitstring(anim_data(reference=(10, 5, 1))),
+            "1" + "0" + "0101" + "10000" + "000" + "0",
+        )
         volley = owner_full_frame(
             9, [Instance(1, Graph(0x0257, 4, 0), active={1: HasData(volley_data(3))})], {}
         )

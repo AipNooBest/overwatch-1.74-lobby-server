@@ -30,20 +30,25 @@ from ow174.game.script import graph
 DROP_GRAPHS: set[int] = set()  # 16-bit graph indexes to leave out of every picture
 # The state classes the static picture activates, a set of name suffixes or None for "all the
 # one-bit classes the encoder can write". Every body_* function takes it explicitly; SHIP_STATES
-# below is what a live server sends. The two-bit classes below ignore it: they move through
-# `entries`, because the client must see them begin and stop with real data.
-SHIP_STATES = frozenset({"HealthPool", "BooleanSwitch", "Stack", "Wait", "UXPresenter"})
+# below is what a live server sends: the health and HUD structure, the weapon cosmetics (the gun
+# model), the logical buttons the firing conditions run through and the animations (their state
+# data is the optional entity reference, so an active Anim without a reference plays nothing and
+# cannot hang the frame). WeaponVolley moves through `entries` instead - the client must see it
+# begin and stop with its data - and the expiry-tick class (0x691BFA55) stays out: a live run
+# showed its begin action dies without the type-3 preloads. An entry without a mask bit consumes
+# nothing, so a class left out cannot shift the frame.
+SHIP_STATES = frozenset({"HealthPool", "BooleanSwitch", "Stack", "Wait", "UXPresenter",
+                         "CosmeticEntity", "LogicalButton", "Anim"})
 STRUCTURAL = {"STU_37D754C8", "STU_9D7BF987"}  # SubScript launchers and the HUD widget gates
 
 VAR_ID_MASK = 0xFFFFFFFFFFFF  # the .01C identifier's index, without the type bits
 
-# The native predicate over the graph metadata divides the 486 state classes three ways: the many
-# one-bit kinds (a bare active bit), a handful whose one-bit entry carries its own state-data bits
-# (BooleanSwitch, Stack, the sender class; statescript.DATA_STATES writes them), and three classes
-# whose entry is has-data + active + state data (statescript.HAS_DATA_STATES has their builders,
-# statescript.HasData is the entry form). The unnamed third class (0x691BFA55) has no builder yet:
-# its data reader has not been read, so its states stay unentered - an entry without a mask bit
-# consumes nothing, which cannot shift the frame.
+# The native predicate at 0xf5e960 divides the 486 state classes three ways: the many one-bit
+# kinds (a bare active bit), a handful whose one-bit entry carries its own state-data bits
+# (BooleanSwitch, Stack, the sender class and the launcher; statescript.DATA_STATES writes them),
+# and four classes whose entry is has-data + active + state data (statescript.HAS_DATA_STATES has
+# their builders, statescript.HasData is the entry form). The predicate's fourth true class,
+# 0x2F07046F, has no state in any graph of our data, so its reader can stay unread.
 HAS_DATA_STATES = {
     "STUStatescriptStateLogicalButton",
     "STUStatescriptStateWeaponVolley",
@@ -129,11 +134,21 @@ def body_instances(
                 child = by_index.get(_subscript_target(node))
                 if child:
                     active[slot] = statescript.subscript(child)
+            elif node.cls == "STUStatescriptStateLogicalButton" and _allowed(node.cls, allow):
+                # The firing and HUD conditions run through active buttons, and an active button
+                # must carry its press counter: the two-bit entry with zero presses so far.
+                active[slot] = statescript.has_data_entry(node.cls)
+            elif node.cls == "STU_691BFA55" and allow is not None and _allowed(node.cls, allow):
+                # The unnamed expiry-tick class of the has-data family: the entry carries the
+                # delay as a sign-magnitude int. A live run activated it and the client died on
+                # spawn (the state's begin action reads preloads the server does not send), so
+                # only an explicitly named allow-list turns it on; `None` (every one-bit class)
+                # leaves it out. The encoder is ready for when the preloads land.
+                active[slot] = statescript.has_data_entry(node.cls, ticks=0)
             elif node.cls in HAS_DATA_STATES:
-                # The two-bit classes stay out of the static picture: a volley that starts at
-                # spawn fires and never ends (callers move it through `entries` instead), and
-                # 0x691BFA55 has no data reader yet. An entry without a mask bit consumes
-                # nothing, so leaving them out cannot shift the frame.
+                # A volley lit at spawn fires and never ends - callers move those through
+                # `entries` - and an entry without a mask bit consumes nothing, so leaving
+                # them out cannot shift the frame.
                 continue
             elif not _allowed(node.cls, allow):
                 continue  # outside the allow-list: not activated, no entry in the mask

@@ -263,12 +263,10 @@ class GameServer:
         self.on_leave = on_leave  # called with each player who leaves a match
         self.skin_of = skin_of  # (account, hero) -> the equipped (skin theme, golden weapon); no locks
         # Give every hero body its statescript graphs (the HUD's data source, see loadout.py).
-        # hero_states overrides the shipped allow-list; None keeps the shipped set, an empty set
-        # sends every class the encoder can write today.
-        # Give every hero body its statescript graphs (the HUD's data source, see loadout.py).
-        # hero_states replaces the shipped allow-list; None means everything the encoder can write.
+        # hero_states replaces the shipped allow-list: None keeps SHIP_STATES, an empty set
+        # activates every class the encoder can write today.
         self.hero_scripts = hero_scripts
-        self.hero_states = hero_states if hero_states is not None else loadout.SHIP_STATES
+        self.hero_states = loadout.SHIP_STATES if hero_states is None else hero_states or None
         self.sock: socket.socket | None = None
         self.lock = threading.RLock()
         self.handoffs: dict[int, tuple[Handoff, Player]] = {}  # connection id -> waiting player

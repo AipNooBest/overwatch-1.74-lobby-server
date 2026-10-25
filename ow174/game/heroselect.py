@@ -32,6 +32,8 @@ from ow174.game.statescript import (
     Bool,
     Graph,
     Instance,
+    chunk,
+    graph_create_frame,
     owner_full_frame,
     subscript,
 )
@@ -72,6 +74,16 @@ def controller_of(mode_guid: int) -> Controller:
 # state on leaves the subgraph empty, and the hero select grid loses its heroes.
 HUD_GATE = 0
 HUD_BEGIN_VARS = (17906, 18405)
+# The UI side's own variables, as entity variables of the same snapshot: the HUD layers exist only
+# after UI graph 041A's state 20 turns its mode machine on. That state's condition is an OR of
+# five terms, one of which is the global var 0x09BA (ui-graphs-casc report B3/B4), and the
+# dispatcher graph 046B keeps the preload-sync var 0x401F. The retail server replicates them over
+# the statescript component's global sync-var section - the frame's entity-variable list is that
+# section (id-delta entries terminated by id 0, bools one bit), so they ride the UI entity's
+# snapshot next to the begin vars. 09FC (preload, the 041A pool) comes along: an entity variable
+# the client has no slot for is stored and unused, not an error (the hero select screen has
+# ignored unknown vars in its own snapshots since the first live runs).
+UI_HUD_VARS = (0x09BA, 0x401F, 0x09FC)
 
 
 def controller_frame(
@@ -101,7 +113,7 @@ def controller_frame(
         active[controller.hud_bit] = subscript(4)
         states = {HUD_GATE: None} if hud else {}
         if hud:
-            variables.update(dict.fromkeys(HUD_BEGIN_VARS, Bool(True)))
+            variables.update(dict.fromkeys(HUD_BEGIN_VARS + UI_HUD_VARS, Bool(True)))
         instances.append(Instance(4, HUD, parent=(1, controller.hud_state), active=states))
     entry = len(instances) + 1
     host.active[1] = subscript(entry)
@@ -111,6 +123,29 @@ def controller_frame(
     if hide_assemble:
         screen.extra[HIDE_ASSEMBLE] = Bool(True)
     return owner_full_frame(cmfd, instances, variables)
+
+
+def world_ui_graph_chunk():
+    """The UI entity's first record: the empty graph-info chunk at base 1, mirroring the bodies'
+    two-step sequence (§ the create must not list the instances the snapshot creates)."""
+    return chunk(graph_create_frame([Instance(1, HUD)]), 1, 1)
+
+
+def world_ui_chunk(cmfd: int):
+    """The HUD's own mount on a server-created UI entity: the widget's visibility predicate
+    resolves through the UI instance's owner and accepts only an entity whose GetWorld is a game
+    world. GetWorld is the entity's registration world (entity+0x120), and every entity the
+    create path makes on the game channel is registered in the game world - so a create record
+    for the UI definition (0x04000000000001F1) is world-owned without any attach. The client's
+    own UI entity is owned by the client's global root, which is why the menu-shape mount above
+    (20E4 on the controller) never draws the widgets in a match. Same gate and begin variables
+    as the controller mount, wrapped at base 0 like the body's activating snapshot."""
+    frame = owner_full_frame(
+        cmfd,
+        [Instance(1, HUD, active={HUD_GATE: None})],
+        dict.fromkeys(HUD_BEGIN_VARS + UI_HUD_VARS, Bool(True)),
+    )
+    return chunk(frame, 0, 3)
 
 
 def picked_hero(parameters: bytes) -> int | None:

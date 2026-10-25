@@ -47,6 +47,11 @@ log = logging.getLogger("ow174.game")
 PLAYER_DEFINITION = 0x040000000000000E  # 000E.003, the player (controller) entity
 GAME_MODE_DEFINITION = 0x04000000000016B2
 GAME_MODE_ENTITY = 0xD0000010
+# The UI entity of a world (see heroselect.world_ui_chunk): definition 1F1, the one the client's
+# UI manager knows; created by the server and attached to the game mode entity so that the HUD
+# widgets of its statescript pass their world-ownership check.
+UI_DEFINITION = 0x04000000000001F1
+UI_ENTITY = 0x00000000000063F1
 PLAYER_FLAGS = WITH_PARTICIPANT | PLAYER_PATH | WITH_TRANSFORM | WITH_SCALE
 BODY_FLAGS = WITH_TRANSFORM | WITH_SCALE
 
@@ -200,6 +205,13 @@ class Match:
         self.started = time.time()
         self.on_leave = on_leave  # called with each player who leaves
         self.ended = False
+        # The world's UI entity (heroselect.world_ui_chunk): the HUD's mount on an entity the
+        # game world owns, which the widget visibility predicate demands. Two counters again:
+        # the create carries the graph-info record (last = 1), the snapshot follows separately.
+        self.ui_script: Stream | None = None
+        self.ui_next = 0.0
+        self.ui_sends = 0
+        self.ui_player: Player | None = None
 
     def add_player(self, account_lo: int, name: str, hero_guid: int, team: int, tournament: bool) -> Player:
         hero = heroes().get(hero_guid) or heroes()[SOLDIER]
@@ -289,12 +301,31 @@ class Match:
                 viewer.body_script.data_last = 1
                 viewer.body_full_next = self.now + 0.5
                 viewer.volley = loadout.volley_target(viewer.hero.body)  # the gun to light on fire
-        return [
+        updates = [
             EntityUpdate(
                 viewer.body, OP_CREATE, lambda origin: self._body_create(origin, viewer, state), state,
                 chunk=chunk,
             )
         ]
+        if self.hero_scripts and self.ui_script is None:
+            # once per match: the UI entity the HUD rides (heroselect.py explains the predicate).
+            # A world-owned entity by registration alone - the create path stores the game world
+            # into entity+0x120, which is what GetWorld answers, so no movement parent is needed.
+            # The create carries its graph-info record, update sends the snapshot.
+            self.ui_script = Stream(UI_ENTITY)
+            self.ui_script.last = 1
+            self.ui_script.data_last = 1
+            self.ui_next = self.now + 0.5
+            self.ui_player = viewer
+            updates.append(
+                EntityUpdate(
+                    UI_ENTITY, OP_CREATE,
+                    lambda origin: world.create(origin, UI_DEFINITION, {}),
+                    None,
+                    chunk=heroselect.world_ui_graph_chunk(),
+                )
+            )
+        return updates
 
     def _body_create(self, origin: int, owner: Player, state: Movement | None) -> world.RecordWriter:
         components = world.health(HEALTH, HEALTH)
@@ -403,6 +434,13 @@ class Match:
             for other in self.players:
                 if other is not viewer and self._shown(other) and other.body not in viewer.seen:
                     viewer.client.queue_entities([self.remote_body_create(viewer, other)])
+        if (
+            self.ui_script is not None
+            and self.ui_script.delivered < 3  # the client has not confirmed the HUD snapshot yet
+            and self.ui_sends < 3
+            and now >= self.ui_next
+        ):
+            self._ui_snapshot(now)
 
     def _spawn_steps(self, player: Player, client, now: float) -> None:
         waited = now - player.loaded_at
@@ -504,6 +542,22 @@ class Match:
         player.body_full_sends += 1
         player.body_full_next = now + 1.0
         log.info("[game] %s: %s's body snapshot sent, cmfd %d", self.label(), player.name, cmfd)
+
+    def _ui_snapshot(self, now: float) -> None:
+        """The HUD's full snapshot on the world's UI entity (heroselect.world_ui_chunk): the same
+        CmFD and numbering rules as the body's picture, sent once."""
+        cmfd = self.ui_script.next_cmfd(self._newest_frame(self.ui_player))
+        update = EntityUpdate(UI_ENTITY, chunk=heroselect.world_ui_chunk(cmfd))
+        last = max(self.ui_script.last + 1, 3)
+        update.chunk_last = last
+        update.stream = self.ui_script
+        update.resend = False
+        self.ui_script.last = last
+        self.ui_script.data_last = max(self.ui_script.data_last, last)
+        self.ui_player.client.queue_entities([update])
+        self.ui_sends += 1
+        self.ui_next = now + 1.0
+        log.info("[game] %s: world UI entity snapshot sent, cmfd %d", self.label(), cmfd)
 
     VOLLEY_SECONDS = 0.25  # the vendor's live pulse: volley on, then off about 250 ms later
 

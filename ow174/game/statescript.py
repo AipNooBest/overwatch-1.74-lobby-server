@@ -161,6 +161,45 @@ def button_data(count: int = 0) -> BitWriter:
     return out
 
 
+def expiry_data(ticks: int = 0) -> BitWriter:
+    """The state data of the unnamed two-bit class (0x691BFA55, reader 0xc91150): one
+    sign-magnitude int. The reader subtracts it from the owner snapshot's frame count and stores
+    the result as the state's expiry tick, so the number is a delay in frames; zero is an
+    immediate expiry and the smallest safe payload (ten bits)."""
+    out = BitWriter()
+    out.bit(0)  # sign: positive
+    out.w_var(ticks)
+    return out
+
+
+def anim_data(reference: tuple[int, int, int] | None = None) -> BitWriter:
+    """The state data of an active Anim (reader 0xcbd370): an optional state reference (present
+    bit, then the instance id as a varint - one 0 bit means 4 bits, 1-0 means 8, 1-1 means 16 -
+    and a state index of the referenced graph's stored width), a 3-bit field, and a gate bit
+    (set: one more bit, set: a sign-magnitude int follows). With no reference the state plays
+    nothing - the form a static picture sends; `reference` is (instance, width_bits, state) for
+    the graph whose CosmeticEntity should host the animation."""
+    out = BitWriter()
+    if reference is None:
+        out.bit(0)
+    else:
+        instance, width, state = reference
+        out.bit(1)
+        if instance < 16:
+            out.bit(0)
+            out.bits(instance, 4)
+        elif instance < 256:
+            out.bits(0b01, 2)
+            out.bits(instance, 8)
+        else:
+            out.bits(0b11, 2)
+            out.bits(instance, 16)
+        out.bits(state, width)
+    out.bits(0, 3)  # the field
+    out.bit(0)  # gate: no trailing int
+    return out
+
+
 @dataclass(frozen=True)
 class HasData:
     """A state entry of a class whose form is has-data + active + state data (WeaponVolley,
@@ -172,22 +211,23 @@ class HasData:
     active: bool = True
 
 
-# The state-data forms of the entries in a full snapshot (the native predicate over the graph
-# metadata's state types): three classes take the two-bit has-data form, with Volley and Button
-# described by the builders here and the unnamed third one (0x691bfa55) still without a reader -
-# the loadout leaves its states out of the picture. Three classes take a bare active bit plus a
-# small payload - the BooleanSwitch's branch bit, the Stack's two bits and the sender's compact
-# u16 below. Everything else needs no data bits.
+# The state-data forms of the entries in a full snapshot (the native predicate at 0xf5e960 over
+# the graph metadata's state types): the classes in DATA_STATES take a bare active bit plus their
+# own small payload - the BooleanSwitch's branch bit, the Stack's two bits, the sender's compact
+# u16 and the Anim's optional reference. The classes in HAS_DATA_STATES take the two-bit has-data
+# form instead. The predicate's fourth true class, 0x2F07046F, has no state in any graph of our
+# data, so its reader can stay unread. Everything else needs no data bits.
 DATA_STATES = {
     "STUStatescriptStateBooleanSwitch": switch_data,
     "STUStatescriptStateStack": stack_data,
     "STUStatescriptStateGameMessageEntry": sender_data,
+    "STUStatescriptStateAnim": anim_data,
 }
 
 HAS_DATA_STATES = {
     "STUStatescriptStateWeaponVolley": volley_data,
     "STUStatescriptStateLogicalButton": button_data,
-    "STU_691BFA55": None,  # the form is has-data + active + data; the data reader is not read yet
+    "STU_691BFA55": expiry_data,  # one sign-magnitude int: the delay until the state expires
 }
 
 

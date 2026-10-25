@@ -37,10 +37,10 @@ class LoadoutTests(unittest.TestCase):
         # Unrestricted frames per hero body: instance counts, entity vars and the full snapshot's
         # bit size (the numbers a regression to the encoder must not change).
         expected = {
-            "Echo": (8, 6, 1063, 1108),
-            "Genji": (8, 7, 1049, 1094),
-            "Soldier: 76": (9, 4, 823, 868),
-            "Wrecking Ball": (10, 9, 1327, 1372),
+            "Echo": (8, 6, 1148, 1193),
+            "Genji": (8, 7, 1119, 1164),
+            "Soldier: 76": (9, 4, 883, 928),
+            "Wrecking Ball": (10, 9, 1407, 1452),
         }
         for name, (graphs, evars, frame_bits, full_bits) in expected.items():
             hero = next(h for h in heroes().values() if h.name == name)
@@ -83,7 +83,7 @@ class LoadoutTests(unittest.TestCase):
         instances, entity_vars = loadout.body_instances(0x0400000000002593, allow=loadout.SHIP_STATES)
         self.assertEqual(len(instances), 8)  # the graphs stay: launchers and gates are structure
         self.assertEqual(len(entity_vars), 6)
-        self.assertEqual(loadout.body_frame(0x0400000000002593, 1, allow=loadout.SHIP_STATES).count, 1058)
+        self.assertEqual(loadout.body_frame(0x0400000000002593, 1, allow=loadout.SHIP_STATES).count, 1143)
         launchers = [
             slot for instance in instances for slot in instance.active
             if instance.graph.index != statescript.HUD.index
