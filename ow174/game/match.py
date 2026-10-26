@@ -183,7 +183,12 @@ def no_skin(account_lo: int, hero: int) -> tuple[int, bool]:
 
 class Match:
     def __init__(
-        self, game_map: GameMap, on_leave=None, skin_of=no_skin, hero_scripts=False, hero_states=None
+        self,
+        game_map: GameMap,
+        on_leave=None,
+        skin_of=no_skin,
+        hero_scripts=False,
+        hero_states=None,
     ) -> None:
         self.id = (secrets.randbits(63), secrets.randbits(63))
         self.game_map = game_map
@@ -215,6 +220,10 @@ class Match:
         self.ui_sends = 0
         self.ui_player: Player | None = None
         self.mode_on = False  # the game mode's statescript (heroselect.mode_chunk), the .mode switch
+        self.ui_msg_sent = False  # the .0C47 ring went out (the HUD layer machine woke up)
+        self.ui_phase_at = 0.0  # when the next step of the mount sequence may go
+        self.ui_remount = 0  # 0 idle, 1 the bare frame is due next, 2 the widgets return
+        self.mount_widgets = True  # the widget instances ride the mount picture
 
     def add_player(self, account_lo: int, name: str, hero_guid: int, team: int, tournament: bool) -> Player:
         hero = heroes().get(hero_guid) or heroes()[SOLDIER]
@@ -362,6 +371,10 @@ class Match:
         return {44: [player.body] * 3, 75: [player.hero.guid, theme, None, player.hero.guid]}
 
     def _game_mode_create(self, origin: int) -> world.RecordWriter:
+        # Two fields only: the u32[] and the mode GUID. The longer field list the component's
+        # schema allows (the map guid, four u64s, the state s32 at index 7) crashes the client
+        # with the padding the encoder emits for the untouched entries - the state has to ride
+        # a component update once the exact wire layout of the rest of the fields is known.
         return world.create(origin, GAME_MODE_DEFINITION, {114: [None, self.game_map.mode_guid]})
 
     def remote_body_create(self, viewer: Player, other: Player) -> EntityUpdate:
@@ -444,6 +457,22 @@ class Match:
             and now >= self.ui_next
         ):
             self._ui_snapshot(now)
+        if self.ui_script is not None and not self.ui_msg_sent:
+            if self.ui_script.delivered >= 3 and now >= self.ui_phase_at:
+                # the mount landed: ring the machine, then cycle the widgets so their presenters
+                # begin with the layers there to mount into (heroselect.ui_mount_frame)
+                self.ui_hud_message()
+                self.ui_msg_sent = True
+                self.ui_remount = 1
+                self.ui_phase_at = now + 0.6
+        elif self.ui_remount and now >= self.ui_phase_at:
+            if self.ui_remount == 1:
+                self.ui_mount(False)
+                self.ui_remount = 2
+            else:
+                self.ui_mount(True)
+                self.ui_remount = 0
+            self.ui_phase_at = now + 0.6
         if self.mode_on:
             for player in self.players:
                 if (
@@ -529,6 +558,26 @@ class Match:
             return
         self.ui_script.full_frame(heroselect.ui_hud_message())
         log.info("[game] %s: UI entity listener message sent", self.label())
+
+    def ui_mount(self, widgets: bool) -> None:
+        """Re-send the mount as an owner frame, with or without the widget instances (the .mount
+        debug switch and the auto step after the ring). A full frame destroys the instances it
+        does not list, so off/on is a destroy-create cycle: the widgets' presenters run their
+        begin again, this time with the HUD layers the ring created to mount into."""
+        if self.ui_script is None or self.ui_player is None or self.ui_player.client is None:
+            return
+        self.mount_widgets = widgets
+        cmfd = self.ui_script.next_cmfd(self._newest_frame(self.ui_player))
+        frame = heroselect.ui_mount_frame(cmfd, widgets)
+        last = max(self.ui_script.last + 1, 3)
+        update = EntityUpdate(UI_ENTITY, chunk=frame)
+        update.chunk_last = last
+        update.stream = self.ui_script
+        update.resend = False
+        self.ui_script.last = last
+        self.ui_script.data_last = max(self.ui_script.data_last, last)
+        self.ui_player.client.queue_entities([update])
+        log.info("[game] %s: UI entity mount re-sent (%s)", self.label(), "on" if widgets else "off")
 
     def _send_countdown(self, player: Player, now: float) -> None:
         """The seconds left, as the game mode entity's v1303. The client shows them rounded up.

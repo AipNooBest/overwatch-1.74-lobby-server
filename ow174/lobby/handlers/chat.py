@@ -31,9 +31,9 @@ def chat(session: Session, value: dict) -> None:
 
 
 DEBUG_HELP = (
-    ".hero <name>, .leave, .hudroot (ring the HUD layer listener), .mode <on|off> (the game mode's "
-    "statescript), .hud (the group banner), .pres <on|off> (weapon-script presenters), "
-    ".banner <on|off> (matches ride the banner), .help"
+    ".hero <name>, .leave, .hudroot (ring the HUD layer listener), .mount <on|off> (re-create the "
+    "HUD widgets), .mode <on|off> (the game mode's statescript), .hud (the group banner), "
+    ".pres <on|off> (weapon-script presenters), .banner <on|off> (matches ride the banner), .help"
 )
 
 
@@ -42,10 +42,17 @@ def _match_command(session: Session, channel: dict, text: str) -> bool:
     game = session.server.game
     command, _, rest = text[1:].partition(" ")
     command = command.lower()
-    if command not in ("hero", "leave", "help", "hud", "hudroot", "pres", "banner", "mode"):
+    if command not in ("hero", "leave", "help", "hud", "hudroot", "mount", "pres", "banner", "mode"):
         return False
     if command == "help":
         reply = DEBUG_HELP
+    elif command == "mount":
+        if game is None:
+            reply = "The game server is off."
+        else:
+            on = _switch(rest)
+            game.ui_mounts(on)
+            reply = f"HUD widgets {'re-created' if on else 'destroyed'}."
     elif command == "hudroot":
         if game is None:
             reply = "The game server is off."

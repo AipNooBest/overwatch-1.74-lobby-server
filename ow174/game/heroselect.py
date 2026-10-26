@@ -33,6 +33,7 @@ from ow174.game.statescript import (
     Float,
     Graph,
     Instance,
+    Int,
     chunk,
     graph_create_frame,
     owner_full_frame,
@@ -142,13 +143,29 @@ UI_HOST_LAUNCH = 25  # the SubScript state that starts 0x120B
 UI_MACHINE = Graph(0x120B, 44, 8, 23)
 MACHINE_ROOT = 15
 MACHINE_MESSAGE = 22  # the remote-sync position of the .0C47 listener (worknotes S2)
+MACHINE_PANEL = 22  # the SubScript state whose GWO is the hero panel graph
+# The ammo widget (worknotes/hud-msg-indices S3): three UXPresenters, a branch switch and a
+# .0C47 listener; the number is its own instance var 0x0035, presence bit 2, and the widget
+# re-reads it whenever a snapshot writes it. The hero panel (0x183C) has one networked state,
+# the gate; its nine entity variables are read by the client-side preload and stay at defaults.
+AMMO_WIDGET = Graph(0x20E7, 5, 5, 4)
+HERO_PANEL = Graph(0x183C, 1, 0, 1)
+PANEL_VARS = (0x0520, 0x4580, 0x2F47, 0x57A8, 0x2C2A, 0x43CE, 0x2613, 0x099B, 0x1A3C)
 
 
 def world_ui_graph_chunk():
     """The UI entity's first record: the empty graph-info chunk at base 1, mirroring the bodies'
     two-step sequence (§ the create must not list the instances the snapshot creates)."""
     return chunk(
-        graph_create_frame([Instance(1, UI_HOST), Instance(2, UI_MACHINE), Instance(3, HUD)]),
+        graph_create_frame(
+            [
+                Instance(1, UI_HOST),
+                Instance(2, UI_MACHINE),
+                Instance(3, HUD),
+                Instance(4, AMMO_WIDGET),
+                Instance(5, HERO_PANEL),
+            ]
+        ),
         1,
         1,
     )
@@ -183,17 +200,60 @@ def ui_hud_message():
     return _ui_mount_frame(0, True)
 
 
-def _ui_mount_frame(cmfd: int, ring: bool):
+def _ui_mount_frame(cmfd: int, ring: bool, magazine: int = 30, widgets: bool = True):
+    """The world UI entity's picture: the 041A root, its layer machine, the controller-shape HUD
+    graph, and the two content widgets the machine's message builds around in a real client - the
+    ammo counter (0x20E7, its number is the instance variable at presence bit 2) and the hero
+    panel (0x183C, one networked gate, parented under the machine's launcher slot 22). The ring
+    variant is the same picture as an H=0 frame with the listener positions lit: the machine's
+    match-start message and the widget's own refresh door (worknotes/hud-msg-indices S3).
+    Without the widgets the picture is the bare layer mount: a full frame destroys the instances
+    it does not list, which is the off half of the re-create the presenters need."""
     instances = [
-        Instance(1, UI_HOST, active={UI_HOST_GATE: switch_data(), UI_HOST_LAUNCH: subscript(2)}),
+        Instance(
+            1,
+            UI_HOST,
+            active={UI_HOST_GATE: switch_data(), UI_HOST_LAUNCH: subscript(2)},
+        ),
         Instance(2, UI_MACHINE, parent=(1, UI_HOST_LAUNCH), active={MACHINE_ROOT: None}),
         Instance(3, HUD, active={HUD_GATE: None}),
     ]
-    variables = dict.fromkeys(HUD_BEGIN_VARS + UI_HUD_VARS, Bool(True))
+    if widgets:
+        instances += [
+            Instance(
+                4,
+                AMMO_WIDGET,
+                # every var the widget's presenters bind: the number and its magazine (the
+                # widget's own instance pool), plus the identity vars the binding list names.
+                # The number is an int, exactly as in the weapon graph (live-proven there);
+                # the float form crashed the client on the snapshot that carried it.
+                presence={0: Int(0), 1: Int(0), 2: Int(magazine), 3: Int(magazine),
+                          4: Int(magazine)},
+                active={0: None, 1: switch_data(), 2: None, 3: None},
+            ),
+            # parented under the machine's launcher slot: the panel instance exists and the
+            # launcher adopts it on the ring's message; lighting the launcher itself from the
+            # snapshot (its subscript entry) crashed the client together with the float form
+            Instance(5, HERO_PANEL, parent=(2, MACHINE_PANEL), active={0: None}),
+        ]
+    # the widget's three entity-scope bindings (the hero, the weapon, the panel slot) join the
+    # begin variables and the panel's nine: a presenter whose bound var is missing asserts
+    variables = dict.fromkeys(
+        HUD_BEGIN_VARS + UI_HUD_VARS + PANEL_VARS + (0x2AD4, 0x73ED, 0x001F), Bool(True)
+    )
     if ring:
         instances[1].remote[MACHINE_MESSAGE] = None
+        if widgets:
+            instances[3].remote[3] = None  # the widget's own listener position (S3)
         return remote_frame(instances, variables)
     return owner_full_frame(cmfd, instances, variables)
+
+
+def ui_mount_frame(cmfd: int, widgets: bool):
+    """The mount re-sent as an owner snapshot, with or without the widget instances (the .mount
+    debug switch): dropping them from a full frame destroys the instances and their states, so
+    sending them again runs every presenter's begin afresh."""
+    return chunk(_ui_mount_frame(cmfd, False, widgets=widgets), 0, 3)
 
 
 # The game mode entity's statescript, Practice Range (worknotes/mode-graph-2026-10-26.md): 0x13C0
@@ -204,6 +264,7 @@ MODE_GRAPH = Graph(0x13C0, 20, 3)
 MODE_CHILDREN = (Graph(0x0CBB, 69, 13), Graph(0x0C8F, 10, 4), Graph(0x0CB6, 1, 0))
 MODE_TIMER = Graph(0x0BD6, 55, 0)
 MODE_COUNTDOWN = 0x0517  # the assemble countdown, entity scope in the PvP graph's pool
+MODE_HUD_FLAG = 0x07AA  # the game-started bool the mode's announce state writes at begin (worknotes)
 
 
 def world_mode_graph_chunk():
@@ -255,7 +316,7 @@ def mode_chunk(cmfd: int, seconds: float):
             Instance(4, cb6, parent=(1, 21), active={0: None}),
             Instance(5, MODE_TIMER, parent=(1, 14)),
         ],
-        {MODE_COUNTDOWN: Float(seconds)},
+        {MODE_COUNTDOWN: Float(seconds), MODE_HUD_FLAG: Bool(True)},
     )
     return chunk(frame, 0, 3)
 

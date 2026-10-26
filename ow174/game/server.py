@@ -376,6 +376,13 @@ class GameServer:
             for match in self.matches:
                 match.set_mode_graph(on)
 
+    def ui_mounts(self, widgets: bool) -> None:
+        """The .mount debug switch: re-send every match's HUD mount with or without the widget
+        instances (their destroy and re-create is what restarts the presenters)."""
+        with self.lock:
+            for match in self.matches:
+                match.ui_mount(widgets)
+
     def ui_hud_messages(self) -> int:
         """Ring the HUD layer listener of every live match (the chat's .hudroot): how many
         matches were sent the message."""
