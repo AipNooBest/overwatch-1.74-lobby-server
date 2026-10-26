@@ -23,11 +23,13 @@
 - Match flow after "Assemble your team": no round phase, no objectives, no damage. The hero's own
   weapons, HUD readouts and abilities are scripted server-side already (see `--hero-scripts`,
   [docs/HERO-WEAPONS.md](docs/HERO-WEAPONS.md)), but they cover the body and the gun, not the match.
-- The in-game HUD. The world-owned mount, the layer machine's match-start ring and the ammo and
-  hero-panel widget mounts all land delivered on a live world (docs/HERO-WEAPONS.md traces the
-  chain); the panel's counters are not visibly drawn yet, and the ult button keeps its no-entry
-  mark. The debug chat commands listed in docs/HERO-WEAPONS.md iterate this live without a
-  restart.
+- The in-game HUD. The mount, the match-start ring and the hero HUD content graph (launched on the
+  body's dispatcher graph) land on a live world, but of the readouts only the ult ring draws on a
+  practice-range hero: the ring with its percentage, no blocked-cross glyph, plus two small
+  inactive weapon-slot icons in the bottom-right corner (see docs/HERO-WEAPONS.md for the chain).
+  Not drawn yet: the ammo digits, the health number and bar, the ability slots and the portrait;
+  Soldier's ult percentage waits on the ult charge of his ability script. The debug chat commands
+  listed there iterate this live without a restart.
 
 A match runs up to hero select and a live hero body in the world; do not describe it as a playable game yet.
 

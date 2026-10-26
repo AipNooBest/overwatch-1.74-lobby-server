@@ -77,9 +77,29 @@ directly.
    from a snapshot and must stay off the owner picture: the panel launcher (state 22 with its
    subscript) and the widget's own `.0C47` listener - the listener's remote position (bit 3 of
    `0x20E7`'s list of 4) rides the ring frame instead, which is also the widget's refresh door.
+ 4. **The hero HUD.** The abilities bar, the ammo and health readouts and the ult live in the
+    content graph `0x01CF` - and the client only loads a graph on demand under a launcher whose
+    override names it. The one launcher for `0x01CF` in the corpus sits in the hero HUD dispatcher
+    `0x04B`, which every hero body already owns as a body graph: the body picture lights that
+    launcher with the HUD as its child instance (`loadout.HERO_HUD_*`), and the client streams the
+    graph at activation. Of the HUD's 41 networked states the picture lights two: the visibility
+    gate (state 40) and the one `UXPresenter` (state 28, remote position 13) whose begin
+    instantiates the widgets. The presenter's binding list is split between the instance pool
+    (presence bits: health `0x0756`/`0x0755`, magazine `0x075D`, weapon slot `0x4498`/`0x4499`,
+    ability bookkeeping `0x0A14`/`0x5B85`/`0x2EAB`-`0x2EAD`, the charge int `0x1B84`) and the
+    entity variables (`0x2E27`, `0x0735` - the hero GUID, `0x0757`, `0x0406`, `0x45C2`, `0x2243`,
+    plus the three widget identities `0x2AD4`, `0x73ED`, `0x001F` the ammo counter also binds);
+    the gate watches every one of them, so each bit carries a value.
 
-The chain lands delivered and stable on a live world; whether the hero panel then draws its
-counters is the next question this file will answer.
+The chain lands delivered and stable on a live world. Of the readouts only the ult ring draws
+so far: a practice-range Symmetra shows the ring with its percentage (no blocked-cross glyph)
+and two small inactive weapon-slot icons in the bottom-right corner. The ammo digits, the
+health number and bar, the ability slot row and the portrait do NOT paint from the current
+mounts. An earlier session read an ammo line "30/30", an armor/shield "0/0" and an ability row
+off its screenshots - that was a misread: the "30/30" glyphs are a duplicated render of the
+weapon model, re-verified 2026-10-27 with fresh captures and a camera-move test
+(`evidence/hud-symmetra-verified-20261027.png`). Soldier: 76 shows the same ring; his ult
+charge lives in his ability script and stays a known gap.
 
 ## Debug chat
 
@@ -105,7 +125,8 @@ view model), the `WeaponVolley` slots (the firing entry points; the first is the
 `loadout.volley_target` rides), the `Anim`/`UXPresenter`/`Ability` slot lists. The manager
 (0x15) is identical for all of them: states 29 and 33 are what builds the cosmetics, slot 19 is
 one shared `Anim`. The shared body graphs are 0x33 (the hero's health pool, a schema entry with
-the number), 0x4b (one expiry-tick state) and 0x43 (`Anim` slots 1 and 11, `Ability` slot 5 and
+the number), 0x4b (the hero HUD dispatcher: launcher state 3 starts the HUD graph `0x01CF`, and
+the graph's own expiry-tick state stays dark) and 0x43 (`Anim` slots 1 and 11, `Ability` slot 5 and
 the hero's contact set); each hero adds its own ability graphs, whose slots the extract lists.
 
 Animations and presenters are in the tables but NOT activated by the server today: a live run
