@@ -31,14 +31,17 @@ DROP_GRAPHS: set[int] = set()  # 16-bit graph indexes to leave out of every pict
 # The state classes the static picture activates, a set of name suffixes or None for "all the
 # one-bit classes the encoder can write". Every body_* function takes it explicitly; SHIP_STATES
 # below is what a live server sends: the health and HUD structure, the weapon cosmetics (the gun
-# model), the logical buttons the firing conditions run through and the animations (their state
-# data is the optional entity reference, so an active Anim without a reference plays nothing and
-# cannot hang the frame). WeaponVolley moves through `entries` instead - the client must see it
-# begin and stop with its data - and the expiry-tick class (0x691BFA55) stays out: a live run
-# showed its begin action dies without the type-3 preloads. An entry without a mask bit consumes
-# nothing, so a class left out cannot shift the frame.
-SHIP_STATES = frozenset({"HealthPool", "BooleanSwitch", "Stack", "Wait", "UXPresenter",
-                         "CosmeticEntity", "LogicalButton", "Anim"})
+# model) and the logical buttons the firing conditions run through. Anim and UXPresenter states
+# are deliberately left out: an active one plays its presentation the moment the body activates,
+# and heroes carry ability-anim and placement-presenter states right into the spawn - the
+# soldier spawns mid-visor and the symmetra's placement screen swallows her view model. The
+# animations must be started as transitions (with the state already on), like the volley; the
+# presenter states return with the HUD readouts. WeaponVolley moves through `entries` instead -
+# the client must see it begin and stop with its data - and the expiry-tick class (0x691BFA55)
+# stays out: a live run showed its begin action dies without the type-3 preloads. An entry
+# without a mask bit consumes nothing, so a class left out cannot shift the frame.
+SHIP_STATES = frozenset({"HealthPool", "BooleanSwitch", "Stack", "Wait",
+                         "CosmeticEntity", "LogicalButton"})
 STRUCTURAL = {"STU_37D754C8", "STU_9D7BF987"}  # SubScript launchers and the HUD widget gates
 
 VAR_ID_MASK = 0xFFFFFFFFFFFF  # the .01C identifier's index, without the type bits

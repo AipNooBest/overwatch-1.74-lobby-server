@@ -61,6 +61,62 @@ selection again while loading into the world, so the entry must be removed from 
 (a 20700 without it) at the commit - the banner itself dies by its own deadline or by the accept,
 not by the party state.
 
+
+## Which state is what
+
+The extracted 1.74 data answers this per hero without guessing. Every row: the hero's weapon
+script (the 01B index), the `CosmeticEntity` slots with the entity definition each builds (the
+view model), the `WeaponVolley` slots (the firing entry points; the first is the one
+`loadout.volley_target` rides), the `Anim`/`UXPresenter`/`Ability` slot lists. The manager
+(0x15) is identical for all of them: states 29 and 33 are what builds the cosmetics, slot 19 is
+one shared `Anim`. The shared body graphs are 0x33 (the hero's health pool, a schema entry with
+the number), 0x4b (one expiry-tick state) and 0x43 (`Anim` slots 1 and 11, `Ability` slot 5 and
+the hero's contact set); each hero adds its own ability graphs, whose slots the extract lists.
+
+Animations and presenters are in the tables but NOT activated by the server today: a live run
+showed an active one plays its presentation the moment the body activates - the soldier spawns
+into his visor animation, and the symmetra's teleporter placement screen takes her whole view.
+They must start as transitions (the state on, then the event), as the volley does. The ult
+presentation is the same mechanism: the hero-specific ability graph, its `Anim`/`UXPresenter`
+slots listed here.
+
+| hero | weapon script | cosmetic (def) | volley | anim | presenter | ability |
+|---|---|---|---|---|---|---|
+| Ana | 0xb94 | 59=0x040000000000159C | 5, 43 | 8 | 65, 66 | - |
+| Ashe | 0x14fc | 0=0x0400000000002523 | 7, 113 | 69, 70, 74, 78, 79 | 103, 104 | - |
+| Baptiste | 0x1932 | 0=0x0400000000002CEE | 6, 26 | 17 | - | - |
+| Bastion | 0x12e | - | 14 | 8 | 30, 31 | - |
+| Brigitte | 0x1248 | 24, 50=0x0400000000002283 | - | 25, 26, 27, 28, 31, 32, 33, 38 | 23 | - |
+| Cassidy | 0x1d2 | 27=0x04000000000002A6 | 11, 15 | 9, 33, 39 | 49, 50 | - |
+| D.Va | 0x2b8 | 27=0x0400000000000982 | 5 | 15 | 24, 25 | - |
+| Doomfist | 0xd0a | - | 2 | 15, 20, 31, 34 | 39, 40 | - |
+| Echo | 0x19e5 | - | 3 | 23, 24, 27, 30 | 11, 12 | - |
+| Genji | 0x304 | 30=0x04000000000007A3 | 4, 11 | 7, 9, 10, 16, 17, 18, 25, 26, 39, 40, 61 | 74, 75 | 44, 45 |
+| Hanzo | 0xb9 | 0=0x0400000000000171 | 4, 31 | 30, 43, 44 | - | - |
+| Junkrat | 0x22b | 1=0x0400000000000452 | 12 | 5, 22 | 26, 27 | - |
+| Lúcio | 0x776 | 0=0x0400000000000401 | 12 | 9, 23, 24, 25 | 46, 47, 48 | 18 |
+| Mei | 0x5e6 | 0=0x040000000000091E | 13, 16 | 6 | - | 30 |
+| Mercy | 0x6b | 0=0x04000000000000EB | - | - | 45 | - |
+| Mercy | 0x6d | 0=0x040000000000025E | 6 | 16 | 29, 30 | - |
+| Moira | 0xf76 | - | 6 | 34, 36, 37, 38, 62, 64 | - | 109 |
+| Orisa | 0xbd4 | 30=0x040000000000149A | 24 | 5, 26, 27 | 44, 45 | - |
+| Pharah | 0x23 | 0=0x040000000000003B | 6 | 9 | 24, 25 | - |
+| Reaper | 0x19 | 0=0x0400000000000029, 1=0x0400000000000029 | 6 | 13 | 30, 31 | - |
+| Reinhardt | 0x48 | 0=0x0400000000000061 | - | 19, 20, 21, 22, 23, 24, 41 | 40 | - |
+| Roadhog | 0x1c6 | 16=0x040000000000037C | 9, 12, 14 | 6, 22, 23 | 40, 41 | - |
+| Sigma | 0x187f | 1=0x04000000000031A7 | 20, 28 | 5, 18, 29, 30, 31 | 19 | - |
+| Soldier: 76 | 0x254 | 11=0x04000000000004BF | 10, 16 | 7, 39 | 64, 65, 66 | 31 |
+| Sombra | 0xb1b | 0=0x0400000000001221, 22=0x04000000000015CB | 6 | 17, 33, 55, 56, 57 | - | 45 |
+| Symmetra | 0x157c | 0=0x0400000000000215 | 34 | 9 | 61, 62, 63 | 40 |
+| Torbjörn | 0x1683 | 26=0x0400000000000147 | 10, 13 | 8 | 31, 32 | - |
+| Torbjörn | 0x168c | 0=0x04000000000001BC, 9=0x04000000000001BC | - | 13 | 27 | - |
+| Tracer | 0x16 | 0=0x0400000000000017, 1=0x0400000000000017 | 8 | 9 | 30, 31 | - |
+| Widowmaker | 0x1b | 0=0x040000000000002A | 6, 9 | 33, 66, 67 | 82, 83 | - |
+| Winston | 0xfe | 0=0x04000000000001F2 | - | 8, 20, 21, 22, 23, 36, 37, 38 | 65, 66 | - |
+| Wrecking Ball | 0x1514 | - | 9 | 8, 34 | 25, 26 | - |
+| Zarya | 0x241 | 0=0x04000000000003CD | 16 | 6 | 52, 53 | - |
+| Zenyatta | 0x164 | 72=0x04000000000002DA, 73=0x040000000000028D, 76=0x04000000000002D9, 77=0x040000000000028D, 78=0x040000000000028D, 79=0x040000000000028D, 80=0x040000000000028D, 81=0x040000000000028D, 82=0x040000000000028D, 83=0x040000000000028D, 84=0x040000000000028D | 14, 18 | 8, 48, 49, 50, 51, 52, 53, 66, 67 | 89, 90 | - |
+
 ## Open threads
 
 What is known but not implemented, to continue from:
@@ -73,8 +129,11 @@ What is known but not implemented, to continue from:
   `.025:0x1005` refresh term; the sync-var write hook is documented above, but the readout layer
   of the HUD screens is not fully mounted yet, so the numbers exist (visible on the gun's own
   display) and do not reach the HUD counters.
-- **Multi-weapon heroes.** Heroes with swappable weapons (Torbjorn) take both weapons' cosmetic
-  states from one picture and render them fused; the states need to be split by the active
-  weapon, not all lit at once.
-- **Muzzle flash and tracers** ride state transitions of the WEAPON graphs, which need the Anim
-  states and their type-3 preloads mounted.
+- **Multi-weapon heroes.** Heroes with swappable weapons (Torbjorn) own two weapon scripts - the
+  rivet gun 0x1683 and the hammer 0x168c - and the picture lights both scripts' cosmetic states,
+  so the client renders the fused pair. The split is mechanical: light the first script's
+  cosmetics and leave the alternates to the manager's swap states (the table above lists each
+  script and its definitions).
+- **Muzzle flash and tracers** ride state transitions of the weapon graphs: the `Anim` slots
+  listed above, entered as transitions (with the state already on) and with their type-3
+  preloads mounted.

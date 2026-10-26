@@ -86,7 +86,7 @@ class LoadoutTests(unittest.TestCase):
         instances, entity_vars = loadout.body_instances(0x0400000000002593, allow=loadout.SHIP_STATES)
         self.assertEqual(len(instances), 10)  # the graphs stay: launchers and gates are structure
         self.assertEqual(len(entity_vars), 6)
-        self.assertEqual(loadout.body_frame(0x0400000000002593, 1, allow=loadout.SHIP_STATES).count, 1335)
+        self.assertEqual(loadout.body_frame(0x0400000000002593, 1, allow=loadout.SHIP_STATES).count, 1280)
         launchers = [
             slot for instance in instances for slot in instance.active
             if instance.graph.index != statescript.HUD.index
