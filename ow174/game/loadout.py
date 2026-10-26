@@ -250,7 +250,7 @@ HERO_HUD_PRESENTER = 28
 HERO_HUD_HERO_VAR = 0x0735
 HERO_HUD_PRESENCE = {
     0x0A14: statescript.Int(0),
-    0x0756: statescript.Float(BODY_HEALTH),
+    0x0756: statescript.Int(int(BODY_HEALTH)),  # the current health the bar and its number show
     0x075D: statescript.Int(AMMO_MAGAZINE),
     0x5B85: statescript.Bool(True),
     0x4498: statescript.Int(3),
@@ -267,7 +267,7 @@ HERO_HUD_PRESENCE = {
     0x2450: statescript.Bool(True),
     0x2451: statescript.Bool(True),
     0x2454: statescript.Bool(True),
-    0x0755: statescript.Float(BODY_HEALTH),  # the maximum the health bar and its number read
+    0x0755: statescript.Int(int(BODY_HEALTH)),  # the maximum the health bar and its number read
     0x697C: statescript.Bool(True),
     0x227F: statescript.Bool(True),
     0x1B84: statescript.Int(50),
