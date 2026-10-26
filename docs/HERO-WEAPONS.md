@@ -36,9 +36,11 @@ Firing is the script's own `WeaponVolley` state (for 0x254, state 10 of the weap
 instance 11 of the picture): the two-bit form documented in STATESCRIPT.md, driven from button
 32 of the player's command record. A press lights the volley, a release stops it.
 
-## The HUD needs a world-owned entity, and the mode machine needs mode 5
+## The in-game HUD: world-owned mount, the machine's message, and the widgets
 
-Two independent gates decide whether the in-game HUD draws, and both are native:
+Three pieces decide whether the in-game HUD draws, and the group banner is none of them - role
+selection is a menu screen, and a world entered through it shows the same layers as one entered
+directly.
 
 1. **Owner.** The widget visibility predicate resolves through the UI instance's owner entity and
    accepts only an entity registered in a game world - registration is what makes one: the create
@@ -47,19 +49,52 @@ Two independent gates decide whether the in-game HUD draws, and both are native:
    mount never draws in a match. The server must create its own UI entity (definition
    `0x04000000000001F1`) in the match snapshot and mount the HUD graph on it, with the begin
    variables the HUD screens wait on as entity variables: `0x09BA` (the layer machine's switch
-   term), `0x401F` (the dispatcher's preload var) and `0x09FC` (the mode screen's).
-2. **Mode.** `HUD_Root` itself is created by the mode machine of UI graph `120B`, and its gate is
-   a UI-entity variable the UI manager sets only while the client sits in **mode 5** - the queue
-   "match found" state. Mode 5 is entered by the group banner (message 44203) and leaves with it,
-   which is why a direct match join never shows a HUD: the client is not in the mode. The test
-   join (`--test-map`) therefore rides the queue: the match first joins the queue (44201 plus the
-   party-state entry), the banner answers the client's Accept (44104) when it comes and otherwise
-   waits out its window, and the join happens at the commit.
+   term), `0x401F` (the dispatcher's preload var) and `0x09FC` (the mode screen's). The mount
+   follows the retail shape - graph `0x041A` as the root (BooleanSwitch state 20, launcher state
+   25), its child the layer machine `0x120B` (native state 15, the only thing in the client that
+   creates `HUD_Root` and the layers), and `0x20E4` beside them.
+2. **The machine's message.** `HUD_Root` builds when the machine hears the match-start message
+   `.025:0C47`, and nothing in the content ever sends it: a scan of every graph shows no sender
+   at all - in the client's own boot UI the message is posted natively, to an entity the server
+   does not own. The server rings it itself. A remote-sync (H=0) frame lists the mount and lights
+   the listener's position in `0x120B`'s `m_remoteSyncNodes` (position 22 of 23); the client
+   casts the entry to the state base and begins it, and the begin builds the layers on the spot.
+   A live range answers the ring with its interact prompts (`HUD_Elements`): the layer is there.
+   The queue "match found" mode is not this message: the gate that reads it lives in graph
+   `0x046B`, which the mount does not carry, and the banner's five-second dwell changes only
+   the menu. A banner start keeps the party's queue entry until a game reports the map loaded:
+   an entry still on the loading screen is what makes the client offer role selection again.
+3. **The widgets.** The layers stay empty until the content graphs ride with the mount. The ammo
+   counter is graph `0x20E7`: the number is its own instance variable `0x35` at presence bit 2,
+   and the widget re-reads it whenever a snapshot writes it (the same var the weapon script
+   carries); its two other counters (`0xC6` magazine, `0x1C` charge) are presence bits 3 and 4,
+   and every var its presenters bind must be on the picture or the client asserts. The hero
+   panel is graph `0x183C`: of its 120 states one is networked - the gate - and its nine entity
+   variables arrive with the frame. The widgets are destroyed and re-created as one step: a full
+   frame without the instances drops them, the next full frame re-creates them and every
+   presenter runs its begin again, this time with layers to mount into; the mount sequence rings
+   and re-creates itself once per spawn (`Match.update`). Two entries crash the client when lit
+   from a snapshot and must stay off the owner picture: the panel launcher (state 22 with its
+   subscript) and the widget's own `.0C47` listener - the listener's remote position (bit 3 of
+   `0x20E7`'s list of 4) rides the ring frame instead, which is also the widget's refresh door.
 
-One trap on that path: a party state still carrying the queue entry makes the client offer role
-selection again while loading into the world, so the entry must be removed from the party state
-(a 20700 without it) at the commit - the banner itself dies by its own deadline or by the accept,
-not by the party state.
+The chain lands delivered and stable on a live world; whether the hero panel then draws its
+counters is the next question this file will answer.
+
+## Debug chat
+
+Inside a match, Enter opens the chat and Enter sends; every dot-command acts on the live server,
+so an experiment costs a keypress and no restart:
+
+- `.help` - the command list.
+- `.hero <name>` - switch the live hero (the body re-snapshots with the new scripts).
+- `.leave` - back to the menu; the match is destroyed and a new PLAY starts a fresh one.
+- `.hudroot` - ring the layer machine's message listener again (and re-write the mount's vars).
+- `.mount <on|off>` - destroy (off) or re-create (on) the HUD widget instances on the live mount.
+- `.mode <on|off>` - send (or drop, with a variables-only frame) the game mode's statescript.
+- `.pres <on|off>` - the weapon scripts' UXPresenter states; every scripted body re-sends.
+- `.banner <on|off>` - whether new matches start behind the group banner.
+- `.hud` - show the banner to a client already in a world.
 
 
 ## Which state is what
