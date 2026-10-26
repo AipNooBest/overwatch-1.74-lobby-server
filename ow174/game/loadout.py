@@ -112,6 +112,9 @@ def body_instances(
     hero = next((h for h in heroes().values() if h.body == body_guid), None)
     if hero is not None:
         entity_vars.setdefault(0x03AC, statescript.Asset(hero.guid))
+        entity_vars.setdefault(HEALTH_VAR, statescript.Float(BODY_HEALTH))
+        entity_vars.setdefault(HEALTH_MAX_VAR, statescript.Float(BODY_HEALTH))
+        entity_vars.setdefault(ALIVE_VAR, statescript.Bool(True))
     for index, entry in enumerate(record["graphs"], start=1):
         if entry["graph"] is None:
             continue  # the component's array has an empty slot; the client has no instance there
@@ -188,6 +191,14 @@ MANAGER_STATES = (29, 33)
 # magazine rides the body snapshot itself. AMMO_VAR is the var, AMMO_MAGAZINE the count.
 AMMO_VAR = 0x0035
 AMMO_MAGAZINE = 30
+# The hero HUD's readouts are entity variables of the body (the 1.23 in-process reference wrote
+# them every tick): the current and maximum health the bar and the numbers show, and the flag
+# the readouts hide behind while it says otherwise. A client on a server with no damage takes
+# full health, so the snapshot settles the three once and leaves them.
+HEALTH_VAR = 0x06C4
+HEALTH_MAX_VAR = 0x06C9
+ALIVE_VAR = 0x094C
+BODY_HEALTH = 250.0  # full health; per-hero tables come when the world starts wounding people
 
 
 def gun_instances(
