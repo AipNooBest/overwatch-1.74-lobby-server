@@ -1,5 +1,6 @@
 """Chat channels and whispers, and the commands a player types in any chat while in a match:
-.hero <name> plays another hero, .leave goes back to the menu."""
+.hero <name> plays another hero, .leave goes back to the menu, and the debug set - .hud, .pres,
+.banner - turns the live server's knobs without a restart (see docs/HERO-WEAPONS.md)."""
 
 from ow174.accounts.registry import Account
 from ow174.game.content import find_hero
@@ -29,29 +30,57 @@ def chat(session: Session, value: dict) -> None:
         _deliver(session.server, members, social.chat_message(channel, bot, reply_text))
 
 
+DEBUG_HELP = (
+    ".hero <name>, .leave, .hud (re-open the group banner: mode 5 builds the HUD layers), "
+    ".pres <on|off> (weapon-script presenters), .banner <on|off> (matches ride the banner), .help"
+)
+
+
 def _match_command(session: Session, channel: dict, text: str) -> bool:
-    """Run a match command. False when it is not one, so the text goes out as chat."""
+    """Run a match or debug command. False when it is not one, so the text goes out as chat."""
     game = session.server.game
     command, _, rest = text[1:].partition(" ")
     command = command.lower()
-    if command not in ("hero", "leave") or game is None:
+    if command not in ("hero", "leave", "help", "hud", "pres", "banner"):
         return False
-    if command == "hero":
+    if command == "help":
+        reply = DEBUG_HELP
+    elif command == "hero":
         hero = find_hero(rest.strip())
         if hero is None:
             reply = f"No hero called '{rest.strip()}'."
-        elif game.switch_hero(session.account.account_lo, hero):
-            reply = f"You play {hero.name} now."
-        else:
+        elif game is None or not game.switch_hero(session.account.account_lo, hero):
             reply = "You are not in a match."
-    else:
+        else:
+            reply = f"You play {hero.name} now."
+    elif command == "leave":
         reply = (
-            "Back to the menu." if game.send_home(session.account.account_lo) else "You are not in a match."
+            "Back to the menu." if game is not None and game.send_home(session.account.account_lo)
+            else "You are not in a match."
         )
+    elif command == "hud":
+        session.server.matchmaker.banner_now(session)
+        reply = "Banner sent: mode 5 for the accept window."
+    elif command == "pres":
+        if game is None:
+            reply = "The game server is off."
+        else:
+            on = _switch(rest)
+            count = game.set_gun_presenters(on)
+            reply = f"Weapon presenters {'on' if on else 'off'}, {count} match(es) re-sent."
+    else:  # banner
+        on = _switch(rest)
+        session.server.matchmaker.banner_on = on
+        reply = f"Matches {'ride' if on else 'skip'} the group banner."
     session.log(f"[chat] {text} -> {reply}")
     bot = session.server.social.accounts.bot
     session.send(CHAT_IN, 20400, session.server.social.chat_message(channel, bot, reply))
     return True
+
+
+def _switch(rest: str) -> bool:
+    """on|off|1|0 for the debug switches."""
+    return rest.strip().lower() in ("on", "1", "true", "yes")
 
 
 def _deliver(server, members: list[Account], message: dict) -> None:

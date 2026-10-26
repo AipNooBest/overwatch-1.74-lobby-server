@@ -225,6 +225,7 @@ class LobbyServer:
             self.settings.host,
             self.settings.game_port,
             on_leave=self.game_left,
+            on_load=self.matchmaker.clear_banner_entry,
             skin_of=self.skin_of,
             hero_scripts=self.settings.hero_scripts,
             # --hero-states all: an empty set asks the game server for every class the encoder has

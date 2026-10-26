@@ -220,6 +220,13 @@ class Matchmaker:
         self.tickets: list[Ticket] = []
         self.lock = threading.RLock()
         self._pending = None  # a (game_map, roster, popped) waiting out the 44203 accept window
+        # --test-map and --hero-scripts ship it on (the HUD layers need the banner's mode 5 to
+        # live through the loading screen); the debug chat's .banner turns it live.
+        settings = getattr(server, "settings", None)
+        self.banner_on = bool(
+            getattr(settings, "test_map", "") or getattr(settings, "hero_scripts", False)
+        )
+        self._after_load: list[Ticket] = []  # banner starts: entries to drop when maps report in
 
     # --- the queue -----------------------------------------------------------------------------
 
@@ -338,7 +345,7 @@ class Matchmaker:
                     entries.append((session, ticket, team))
         if not entries:
             return
-        if server.settings.test_map:
+        if self.banner_on:
             # 44203 is the group banner: the client enters mode 5 (the reason string says
             # 'Leaving match lobby'), the UI manager writes var 0x04d2, and the UI chain
             # 0x046b -> 0x05ce -> 0x0bce sets var 0x09ba - the term that makes the native state
@@ -355,18 +362,8 @@ class Matchmaker:
             # compares. A live run took the entry (search tile, role banner, real assemble).
             key = {"+0x0": {"+0x0": QUICK_PLAY, "+0x8": 0, "+0x10": 0}}
             for session, ticket, _team in entries:
-                session.send(
-                    QUEUE, 44201,
-                    {"+0x78": {"+0x0": key, "+0x30": {"+0x0": 0, "+0x8": 0, "+0x10": 0},
-                               "+0x48": 0, "+0x50": 0.0, "+0x54": SEARCHING}},
-                )
-                party = server.social.party_of(session.account)
-                party.queue = key
-                party.queue_state = SEARCHING
-                server.notify_party(party)
                 ticket.key = key  # the commit's 44202 must carry the key the client has
-                session.send(QUEUE, 44203, {"+0x78": key})
-                session.log("[MM] Group banner (44203); mode 5 until the match joins")
+                self._send_banner(session, key, ticket.party)
             self._pending = (game_map, roster, False)  # the commit must NOT send 44202: popping
             # the queue entry cancels the banner, and the client leaves mode 5 one tick before
             # the load; retail answers the GO (44104) with 20402/20600 only, so the dwell holds
@@ -374,6 +371,38 @@ class Matchmaker:
             threading.Timer(ACCEPT_WINDOW, self._commit_start).start()
             return
         self._commit_start(game_map, roster, None, popped)
+
+    def _send_banner(self, session, key: dict, party: Party) -> None:
+        """Join the queue and show the banner: 44201 is the client's own queue-system entry
+        (44100 alone only marks the join pending) and the party state carries it, because a 44203
+        for a queue the client is not in finds no entry and does nothing. The key slots are 4 u64
+        on the wire; the nested form keeps social.pass_pool happy and serialises to the same zeros
+        on both sides, which is all the client's entry lookup compares. The banner's Accept sends
+        44104; the client times itself out after 5 s, and the server decides what the dwell was
+        for when the window ends."""
+        session.send(
+            QUEUE, 44201,
+            {"+0x78": {"+0x0": key, "+0x30": {"+0x0": 0, "+0x8": 0, "+0x10": 0},
+                       "+0x48": 0, "+0x50": 0.0, "+0x54": SEARCHING}},
+        )
+        party.queue = key
+        party.queue_state = SEARCHING
+        self.server.notify_party(party)
+        session.send(QUEUE, 44203, {"+0x78": key})
+        session.log("[MM] Group banner (44203); mode 5 for the accept window")
+
+    def banner_now(self, session) -> None:
+        """A banner for a client that is already in the world (the debug chat's .hud). The mode
+        machine builds the HUD layers on the mode 5 entry and keeps them once the window closes,
+        so one dwell lights the world's HUD up without a re-queue; nothing joins on this banner,
+        so the queue entry is removed when the window is done and the client loses the searching
+        tile exactly as if it had cancelled the search itself."""
+        key = {"+0x0": {"+0x0": QUICK_PLAY, "+0x8": 0, "+0x10": 0}}
+        party = self.server.social.party_of(session.account)
+        self._send_banner(session, key, party)
+        ticket = Ticket(party, {}, 0, time.time(), [(session.account, [])])
+        ticket.key = key
+        threading.Timer(ACCEPT_WINDOW + 1.0, self._end_search, (ticket,)).start()
 
     def banner_accept(self) -> None:
         """The banner's Accept (44104): join now instead of waiting out the timer - every held
@@ -412,11 +441,19 @@ class Matchmaker:
         handoffs = game.create_match(game_map, players)
         tickets = {id(ticket): ticket for _, ticket, _ in entries}
         for ticket in tickets.values():
-            # The queue entry must be gone from the client before the world loads: a party state
-            # that still carries it re-offers role selection on the loading screen (the banner
-            # itself dies by its own deadline or the accept, not by the party state). 44202 rides
-            # only where the search was ended by the queue itself.
-            self._end_search(ticket)
+            # The queue entry must be gone from the client before the world is offered role
+            # selection again: a party state that still carries it re-offers the pick on the
+            # loading screen (the banner itself dies by its own deadline or the accept, not by
+            # the party state). 44202 rides only where the search was ended by the queue itself.
+            if popped:
+                self._end_search(ticket)
+            else:
+                # The banner path keeps the entry until a map reports in: the HUD layers are
+                # built on the mode 5 that rides the loading screen, and the party state without
+                # the entry drops that mode - so the removal waits for the load (MAP_LOADED hits
+                # clear_banner_entry) and lands before the client reaches the world.
+                with self.lock:
+                    self._after_load.append(ticket)
         if channel is None:
             channel = server.social.open_match_chat(handoffs[0].match_id, [s.account for s, _, _ in entries])
         for (session, ticket, _team), handoff in zip(entries, handoffs, strict=True):
@@ -427,6 +464,16 @@ class Matchmaker:
             session.send(HANDOFF, 20600, handoff_message(handoff, host, game.port))
             where = f"game server {host}:{game.port}, connection {handoff.conn}"
             session.log(f"[MM] Match found: {game_map.name}, {where}")
+
+    def clear_banner_entry(self) -> None:
+        """Drop the queue entries a banner start kept until the world reported in: the client
+        has its HUD by then, and a party state still carrying the entry would re-offer role
+        selection on the loading screen the next time. MAP_LOADED of any player is the signal
+        (the game server was given this callable for it)."""
+        with self.lock:
+            tickets, self._after_load = self._after_load, []
+        for ticket in tickets:
+            self._end_search(ticket)
 
     def _end_search(self, ticket: Ticket) -> None:
         """The party is out of the queue; the passes it spent stay spent (a match was found)."""

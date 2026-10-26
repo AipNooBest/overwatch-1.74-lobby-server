@@ -266,6 +266,8 @@ class Client:
             return
         if msg_id in MAP_LOADED:
             self.player.match.map_loaded(self.player, now)
+            if self.server.on_load is not None:
+                self.server.on_load()
         if msg_id == GAME_MESSAGE:
             self.player.match.game_message(self.player, value, now)
             return
@@ -279,6 +281,7 @@ class GameServer:
         host: str = "127.0.0.1",
         port: int = 3730,
         on_leave=None,
+        on_load=None,
         skin_of=no_skin,
         hero_scripts=False,
         hero_states: set[str] | None = None,
@@ -286,6 +289,8 @@ class GameServer:
         self.host = host
         self.port = port
         self.on_leave = on_leave  # called with each player who leaves a match
+        self.on_load = on_load  # called when a game reports the map loaded (the lobby drops the
+        # queue entry the banner start kept alive through the loading screen, see matchmaker)
         self.skin_of = skin_of  # (account, hero) -> the equipped (skin theme, golden weapon); no locks
         # Give every hero body its statescript graphs (the HUD's data source, see loadout.py).
         # hero_states replaces the shipped allow-list: None keeps SHIP_STATES, an empty set
@@ -349,6 +354,21 @@ class GameServer:
                         match.switch_hero(player, hero)
                         return True
         return False
+
+    def set_gun_presenters(self, on: bool) -> int:
+        """Flip the weapon-script presenter knob (the debug chat's .pres) and re-send every
+        scripted body's picture so the live world follows without a restart. Returns how many
+        bodies were re-sent."""
+        loadout.GUN_PRESENTERS = on
+        count = 0
+        with self.lock:
+            for match in self.matches:
+                for player in match.players:
+                    if player.body_script is not None and player.client is not None:
+                        match.resnapshot_bodies()
+                        count += 1
+                        break
+        return count
 
     def send_home(self, account_lo: int | None = None) -> int:
         """Send a player's game (every game for None) back to the menu: 20304 with 0 = leave for good
