@@ -175,6 +175,10 @@ def body_instances(
     return instances, entity_vars
 
 
+# The weapon scripts' UXPresenter states light together with the cosmetics: they are the gun's own
+# HUD readouts, and the in-game debug chat flips them (.pres) without a server restart, so the
+# knob lives here and the encoder reads it on every snapshot.
+GUN_PRESENTERS = True
 # The manager graph's states a live run proved enough to let the weapon cosmetics build (the
 # census manager run: manager states 39 and 43 with a cosmetic state turn the gloves into the
 # gun). They sit at owner bits 29 and 33 in 1.74's 35-state owner list.
@@ -227,6 +231,10 @@ def gun_instances(
             slot: None
             for slot, node in enumerate(g.owner_states())
             if node.cls == "STUStatescriptStateCosmeticEntity"
+            or (GUN_PRESENTERS and node.cls == "STUStatescriptStateUXPresenter")
+            # The weapon scripts' presenters are the HUD readouts (every hero has its counter
+            # slots in the weapon graph; the per-hero tables in docs/HERO-WEAPONS.md list them).
+            # The body graphs' presenters stay dark: those are the placement screens.
         }
         presence = {}
         bit = g.presence_bit(AMMO_VAR)

@@ -603,6 +603,15 @@ class Match:
                 player.select_open = True  # no hero yet: nothing to go back to
             self.send_controller(player)
 
+    def resnapshot_bodies(self) -> None:
+        """Re-send every scripted body's full picture. The debug chat flips encoder knobs and
+        wants the world to follow without a restart: the picture is generated from the settings
+        of the moment, and _body_snapshot numbers its chunk past the last one the client applied,
+        which is the one way to make a client re-take a picture it already has."""
+        for player in self.players:
+            if player.body_script is not None and player.client is not None:
+                self._body_snapshot(player, self.now)
+
     def map_loaded(self, player: Player, now: float) -> None:
         if player.loaded_at is None:
             player.loaded_at = now
