@@ -31,12 +31,13 @@ class Graph:
     index: int  # the 01B graph's 16-bit index
     owner_states: int  # state bits in an owner frame
     sync_vars: int  # per-instance variable presence bits
+    remote: int = 0  # entries in the m_remoteSyncNodes list (the H=0 frame's bit list)
 
 
 # From the graph data (the counts match what worked in ProCore's live tests).
 CONTROLLER = Graph(0x13C1, 43, 12)  # the player's controller in the Practice Range mode
 PVP_CONTROLLER = Graph(0x0C90, 118, 29)  # the controller of both teams in the PvP modes
-HUD = Graph(0x20E4, 1, 0)  # 13C1's weapon and ability HUD (0C90 starts its own)
+HUD = Graph(0x20E4, 1, 0, 1)  # 13C1's weapon and ability HUD (0C90 starts its own)
 HERO_SELECT_HOST = Graph(0x288A, 6, 0)
 HERO_SELECT = Graph(0x288B, 30, 4)  # presents the hero select screen 008C.05A
 TEAM_ENTRY = Graph(0x288D, 0, 0)  # client-only: posts its entity to the local player's team list
@@ -253,6 +254,9 @@ class Instance:
     presence: dict[int, Value] = field(default_factory=dict)  # presence bit -> value
     extra: dict[int, Value] = field(default_factory=dict)  # variable id -> value
     active: dict[int, BitWriter | None] = field(default_factory=dict)  # owner state bit -> payload
+    remote: dict[int, BitWriter | None] = field(
+        default_factory=dict
+    )  # H=0 frame: m_remoteSyncNodes position -> payload
 
 
 def _descriptor(out: BitWriter, instance: Instance) -> None:
@@ -325,6 +329,51 @@ def owner_full_frame(
                 if on and entry is not None:
                     out.append(entry)
         out.bits(0b11, 2)  # the instance's event list ends (code 3)
+    out.bits(0, 2)  # the frame's event lists: none
+    return out
+
+
+def remote_frame(
+    instances: list[Instance], entity_vars: dict[int, Value]
+) -> BitWriter:
+    """A remote-sync (H=0) full frame: the same instance list and variable block as an owner
+    frame, but each instance carries its m_remoteSyncNodes bit list instead of its owner states.
+    The reader casts every entry to the state base and begins it, so a GameMessageEntry listener
+    position lights the way the boot-UI message does - which is how the layer machine's .0C47
+    listener (m_remoteSyncNodes position 22 of 0x120B) is rung on an entity the client's own
+    message never reaches (worknotes/hud-msg-indices-2026-10-26.md). A full frame carries
+    everything the mount holds, states included, so the mount rides it again unchanged."""
+    out = BitWriter()
+    out.bit(0)  # lead
+    out.bit(0)  # H: a remote-sync frame
+    last = 0
+    for instance in sorted(instances, key=lambda item: item.index):
+        out.w_u16(instance.index - last)
+        last = instance.index
+        _descriptor(out, instance)
+    out.w_u16(0)
+    if entity_vars:
+        out.bit(1)
+        _variables(out, entity_vars)
+    else:
+        out.bit(0)
+    for instance in sorted(instances, key=lambda item: item.index):
+        for bit in range(instance.graph.sync_vars):
+            value = instance.presence.get(bit)
+            out.bit(value is not None)
+            if value is not None:
+                write_variable(out, value)
+        if instance.extra:
+            out.bit(1)
+            _variables(out, instance.extra)
+        else:
+            out.bit(0)
+        for bit in range(instance.graph.remote):
+            payload = instance.remote.get(bit)
+            out.bit(bit in instance.remote)
+            if payload is not None:
+                out.append(payload)
+        out.bits(0b11, 2)  # the instance's event list ends
     out.bits(0, 2)  # the frame's event lists: none
     return out
 

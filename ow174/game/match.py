@@ -132,6 +132,8 @@ class Player:
         self.volley_off_at = 0.0
         self.mode_script = Stream(GAME_MODE_ENTITY)  # the game mode entity's variables: the countdown
         self.next_countdown = 0.0
+        self.mode_sends = 0  # mode graph activation records sent (the debug .mode)
+        self.mode_next = 0.0
         self.select_open = True
 
     @property
@@ -212,6 +214,7 @@ class Match:
         self.ui_next = 0.0
         self.ui_sends = 0
         self.ui_player: Player | None = None
+        self.mode_on = False  # the game mode's statescript (heroselect.mode_chunk), the .mode switch
 
     def add_player(self, account_lo: int, name: str, hero_guid: int, team: int, tournament: bool) -> Player:
         hero = heroes().get(hero_guid) or heroes()[SOLDIER]
@@ -441,6 +444,16 @@ class Match:
             and now >= self.ui_next
         ):
             self._ui_snapshot(now)
+        if self.mode_on:
+            for player in self.players:
+                if (
+                    player.client is not None
+                    and player.loaded_at is not None
+                    and player.mode_script.delivered < 3
+                    and player.mode_sends < 3
+                    and now >= player.mode_next
+                ):
+                    self._mode_snapshot(player, now)
 
     def _spawn_steps(self, player: Player, client, now: float) -> None:
         waited = now - player.loaded_at
@@ -467,9 +480,63 @@ class Match:
     def assembling(self) -> bool:
         return self.assemble_ends is not None and not self.assembled
 
+    def set_mode_graph(self, on: bool) -> None:
+        """The debug .mode switch: put the game mode's statescript on a live world. The graph-info
+        record goes first (base 1, descriptors only, exactly the bodies' first step), and
+        _mode_snapshot follows a moment later; the activation retries itself from update() until
+        it lands. Off is one variables-only full frame: a full frame destroys the networked
+        instances it does not list, which unmounts the graph again."""
+        self.mode_on = on
+        for player in self.players:
+            if player.client is None:
+                continue
+            if on:
+                player.client.queue_entities(
+                    [EntityUpdate(GAME_MODE_ENTITY, chunk=heroselect.world_mode_graph_chunk())]
+                )
+                player.mode_script.last = 1
+                player.mode_script.data_last = 1
+                player.mode_sends = 0
+                player.mode_next = self.now + 0.5
+            else:
+                frame = variables_frame({COUNTDOWN: Float(0.0)})
+                player.client.queue_entities([player.mode_script.full_frame(frame)])
+
+    def _mode_snapshot(self, player: Player, now: float) -> None:
+        """The mode graph's activating snapshot, once per player (the entity is the match's)."""
+        seconds = 0.0
+        if self.assemble_ends is not None and not self.assembled:
+            seconds = max(0.0, self.assemble_ends - now)
+        cmfd = player.mode_script.next_cmfd(self._newest_frame(player))
+        update = EntityUpdate(GAME_MODE_ENTITY, chunk=heroselect.mode_chunk(cmfd, seconds))
+        last = max(player.mode_script.last + 1, 3)
+        update.chunk_last = last
+        update.stream = player.mode_script
+        update.resend = False
+        player.mode_script.last = last
+        player.mode_script.data_last = max(player.mode_script.data_last, last)
+        player.client.queue_entities([update])
+        player.mode_sends += 1
+        player.mode_next = now + 1.0
+        log.info("[game] %s: game mode snapshot sent, cmfd %d", self.label(), cmfd)
+
+    def ui_hud_message(self) -> None:
+        """Ring the layer machine's .0C47 listener on the mounted UI entity (heroselect and
+        worknotes/hud-msg-indices-2026-10-26.md): the remote-sync re-send of the mount with the
+        listener's bit on is the match-start the boot UI gets natively and the client never sends
+        to an entity it did not make itself."""
+        if self.ui_script is None or self.ui_player is None or self.ui_player.client is None:
+            return
+        self.ui_script.full_frame(heroselect.ui_hud_message())
+        log.info("[game] %s: UI entity listener message sent", self.label())
+
     def _send_countdown(self, player: Player, now: float) -> None:
-        """The seconds left, as the game mode entity's v1303. The client shows them rounded up."""
+        """The seconds left, as the game mode entity's v1303. The client shows them rounded up.
+        Once the mode graph is on its snapshot carries the countdown; a variables-only full frame
+        would destroy the instances the mode graph just mounted."""
         player.next_countdown = now + COUNTDOWN_EVERY
+        if self.mode_on:
+            return
         seconds = max(0.0, self.assemble_ends - now)
         frame = variables_frame({COUNTDOWN: Float(seconds)})
         player.client.queue_entities([player.mode_script.full_frame(frame)])

@@ -30,12 +30,16 @@ from ow174.game.statescript import (
     PVP_CONTROLLER,
     TEAM_ENTRY,
     Bool,
+    Float,
     Graph,
     Instance,
     chunk,
     graph_create_frame,
     owner_full_frame,
+    remote_frame,
+    stack_data,
     subscript,
+    switch_data,
 )
 
 OPEN_SELECT = 2438
@@ -125,10 +129,29 @@ def controller_frame(
     return owner_full_frame(cmfd, instances, variables)
 
 
+# The native layer machine: its state 15 (the 15-way STU_501733D7) is the one thing in the client
+# that creates HUD_Root and the HUD layers, and every entry node of the graph is networked - so a
+# client-created instance never runs them and only an owner-frame active bit lights the state. On
+# the client's own UI entity the machine is driven by the UI manager's mode byte; mounted on the
+# server's world-owned UI entity it runs from the wire, under the 041A root of the retail boot
+# chain (the layer gate is a five-term OR; on this host its terms are the snapshot's entity
+# variables and the world ownership itself - worknotes/ui-mount-hud-root-2026-10-26.md).
+UI_HOST = Graph(0x041A, 33, 7, 11)
+UI_HOST_GATE = 20  # the BooleanSwitch the chain begins on
+UI_HOST_LAUNCH = 25  # the SubScript state that starts 0x120B
+UI_MACHINE = Graph(0x120B, 44, 8, 23)
+MACHINE_ROOT = 15
+MACHINE_MESSAGE = 22  # the remote-sync position of the .0C47 listener (worknotes S2)
+
+
 def world_ui_graph_chunk():
     """The UI entity's first record: the empty graph-info chunk at base 1, mirroring the bodies'
     two-step sequence (§ the create must not list the instances the snapshot creates)."""
-    return chunk(graph_create_frame([Instance(1, HUD)]), 1, 1)
+    return chunk(
+        graph_create_frame([Instance(1, UI_HOST), Instance(2, UI_MACHINE), Instance(3, HUD)]),
+        1,
+        1,
+    )
 
 
 def world_ui_chunk(cmfd: int):
@@ -138,12 +161,101 @@ def world_ui_chunk(cmfd: int):
     create path makes on the game channel is registered in the game world - so a create record
     for the UI definition (0x04000000000001F1) is world-owned without any attach. The client's
     own UI entity is owned by the client's global root, which is why the menu-shape mount above
-    (20E4 on the controller) never draws the widgets in a match. Same gate and begin variables
-    as the controller mount, wrapped at base 0 like the body's activating snapshot."""
+    (20E4 on the controller) never draws the widgets in a match. The retail shape mounts here:
+    041A -> its gate (BooleanSwitch, branch 0; the five-term OR opens on the wire - the possession
+    term answers true for an entity whose GetWorld is a game world, and 0x09BA is an entity
+    variable of this very snapshot; the mode-byte term lives in 046B, which is not mounted) ->
+    state 25 launches 0x120B -> its state 15 (the native STU_501733D7 layer machine - every entry
+    node of the graph is networked, so only an owner-frame bit lights it) creates HUD_Root and the
+    layers. 20E4 rides next to it with the begin variables the screens wait on. Same variables as
+    the controller mount, wrapped at base 0 like the body's activating snapshot."""
+    return chunk(_ui_mount_frame(cmfd, False), 0, 3)
+
+
+def ui_hud_message():
+    """Ring the layer machine's message listener: the same mount re-sent as an H=0 remote-sync
+    frame with the .0C47 listener's bit (m_remoteSyncNodes position 22 of 0x120B) on. In the
+    client's own boot UI the message arrives natively when the game begins; on our world-owned
+    entity nothing posts it (no content graph sends .0C47) and the layer machine sits waiting -
+    this frame is its match-start, and the begin runs the client-side subgraph that builds
+    HUD_Root. The frame lists the whole mount again (a full frame carries everything) and the
+    same variables; the caller sends it through the mount's own stream."""
+    return _ui_mount_frame(0, True)
+
+
+def _ui_mount_frame(cmfd: int, ring: bool):
+    instances = [
+        Instance(1, UI_HOST, active={UI_HOST_GATE: switch_data(), UI_HOST_LAUNCH: subscript(2)}),
+        Instance(2, UI_MACHINE, parent=(1, UI_HOST_LAUNCH), active={MACHINE_ROOT: None}),
+        Instance(3, HUD, active={HUD_GATE: None}),
+    ]
+    variables = dict.fromkeys(HUD_BEGIN_VARS + UI_HUD_VARS, Bool(True))
+    if ring:
+        instances[1].remote[MACHINE_MESSAGE] = None
+        return remote_frame(instances, variables)
+    return owner_full_frame(cmfd, instances, variables)
+
+
+# The game mode entity's statescript, Practice Range (worknotes/mode-graph-2026-10-26.md): 0x13C0
+# is the round machine, and its launcher at owner state 19 brings up the in-game widget tree
+# (0x0CB6, one gate state like 0x20E4's). Every entry node of 0x13C0 is networked, so the client
+# runs none of it on its own: the phases light from the wire or the round never begins.
+MODE_GRAPH = Graph(0x13C0, 20, 3)
+MODE_CHILDREN = (Graph(0x0CBB, 69, 13), Graph(0x0C8F, 10, 4), Graph(0x0CB6, 1, 0))
+MODE_TIMER = Graph(0x0BD6, 55, 0)
+MODE_COUNTDOWN = 0x0517  # the assemble countdown, entity scope in the PvP graph's pool
+
+
+def world_mode_graph_chunk():
+    """The mode entity's graph-info record, the same first step as the bodies and the UI entity."""
+    return chunk(
+        graph_create_frame([Instance(1, MODE_GRAPH), Instance(2, MODE_TIMER)]), 1, 1
+    )
+
+
+def mode_chunk(cmfd: int, seconds: float):
+    """The activating snapshot: the bare senders and relays lit (states 0..18 minus the switches
+    and stacks, which ride their own data bits), both switches on branch 0, the stacks writing
+    their presence var, and all four launchers carrying children: the HUD widget tree (0x0CB6)
+    under the parent's m_states index 21, the announce (0x0CBB) and re-begin (0x0C8F) listeners
+    dark inside, the round timer (0x0BD6) mounted for the announce chain."""
+    cbb, c8f, cb6 = MODE_CHILDREN
     frame = owner_full_frame(
         cmfd,
-        [Instance(1, HUD, active={HUD_GATE: None})],
-        dict.fromkeys(HUD_BEGIN_VARS + UI_HUD_VARS, Bool(True)),
+        [
+            Instance(
+                1,
+                MODE_GRAPH,
+                presence={0: Bool(True)},
+                active={
+                    0: None,
+                    1: None,
+                    2: switch_data(),
+                    3: None,
+                    4: stack_data(),
+                    5: subscript(2),
+                    6: None,
+                    7: None,
+                    8: None,
+                    9: None,
+                    10: None,
+                    11: None,
+                    12: stack_data(),
+                    13: None,
+                    14: subscript(5),
+                    15: None,
+                    16: subscript(3),
+                    17: switch_data(),
+                    18: None,
+                    19: subscript(4),
+                },
+            ),
+            Instance(2, cbb, parent=(1, 5)),
+            Instance(3, c8f, parent=(1, 16)),
+            Instance(4, cb6, parent=(1, 21), active={0: None}),
+            Instance(5, MODE_TIMER, parent=(1, 14)),
+        ],
+        {MODE_COUNTDOWN: Float(seconds)},
     )
     return chunk(frame, 0, 3)
 

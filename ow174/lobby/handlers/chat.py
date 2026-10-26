@@ -31,8 +31,9 @@ def chat(session: Session, value: dict) -> None:
 
 
 DEBUG_HELP = (
-    ".hero <name>, .leave, .hud (re-open the group banner: mode 5 builds the HUD layers), "
-    ".pres <on|off> (weapon-script presenters), .banner <on|off> (matches ride the banner), .help"
+    ".hero <name>, .leave, .hudroot (ring the HUD layer listener), .mode <on|off> (the game mode's "
+    "statescript), .hud (the group banner), .pres <on|off> (weapon-script presenters), "
+    ".banner <on|off> (matches ride the banner), .help"
 )
 
 
@@ -41,10 +42,23 @@ def _match_command(session: Session, channel: dict, text: str) -> bool:
     game = session.server.game
     command, _, rest = text[1:].partition(" ")
     command = command.lower()
-    if command not in ("hero", "leave", "help", "hud", "pres", "banner"):
+    if command not in ("hero", "leave", "help", "hud", "hudroot", "pres", "banner", "mode"):
         return False
     if command == "help":
         reply = DEBUG_HELP
+    elif command == "hudroot":
+        if game is None:
+            reply = "The game server is off."
+        else:
+            count = game.ui_hud_messages()
+            reply = f"Layer listener rung on {count} match(es)."
+    elif command == "mode":
+        if game is None:
+            reply = "The game server is off."
+        else:
+            on = _switch(rest)
+            game.set_mode_graph(on)
+            reply = f"Game mode statescript {'on' if on else 'off'}."
     elif command == "hero":
         hero = find_hero(rest.strip())
         if hero is None:

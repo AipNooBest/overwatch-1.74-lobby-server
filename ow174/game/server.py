@@ -370,6 +370,22 @@ class GameServer:
                         break
         return count
 
+    def set_mode_graph(self, on: bool) -> None:
+        """The .mode debug switch on every live match (the round machine, see Match.set_mode_graph)."""
+        with self.lock:
+            for match in self.matches:
+                match.set_mode_graph(on)
+
+    def ui_hud_messages(self) -> int:
+        """Ring the HUD layer listener of every live match (the chat's .hudroot): how many
+        matches were sent the message."""
+        count = 0
+        with self.lock:
+            for match in self.matches:
+                match.ui_hud_message()
+                count += 1
+        return count
+
     def send_home(self, account_lo: int | None = None) -> int:
         """Send a player's game (every game for None) back to the menu: 20304 with 0 = leave for good
         (0x7FF7896E6830). Returns how many games were told."""
