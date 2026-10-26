@@ -244,7 +244,7 @@ def _ui_mount_frame(cmfd: int, ring: bool, magazine: int = 30, widgets: bool = T
     if ring:
         instances[1].remote[MACHINE_MESSAGE] = None
         if widgets:
-            instances[3].remote[3] = None  # the widget's own listener position (S3)
+            instances[3].remote[3] = None  # the ammo counter's listener position (S3)
         return remote_frame(instances, variables)
     return owner_full_frame(cmfd, instances, variables)
 

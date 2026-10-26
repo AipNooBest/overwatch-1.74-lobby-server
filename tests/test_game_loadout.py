@@ -34,14 +34,15 @@ class LoadoutTests(unittest.TestCase):
         )
 
     def test_hero_frames_are_the_sizes_the_live_run_proved(self):
-        # Unrestricted frames per hero body: instance counts (body graphs plus the manager and the
-        # weapon scripts that build the gun), entity vars and the full snapshot's bit size (the
-        # numbers a regression to the encoder must not change).
+        # Unrestricted frames per hero body: instance counts (body graphs plus the manager, the
+        # weapon scripts that build the gun and the hero HUD the dispatcher launches), entity
+        # vars and the full snapshot's bit size (the numbers a regression to the encoder must
+        # not change).
         expected = {
-            "Echo": (10, 9, 1474, 1519),
-            "Genji": (10, 10, 1492, 1537),
-            "Soldier: 76": (11, 7, 1250, 1295),
-            "Wrecking Ball": (12, 12, 1749, 1794),
+            "Echo": (11, 19, 2265, 2310),
+            "Genji": (11, 20, 2274, 2319),
+            "Soldier: 76": (12, 17, 2032, 2077),
+            "Wrecking Ball": (13, 22, 2540, 2585),
         }
         for name, (graphs, evars, frame_bits, full_bits) in expected.items():
             hero = next(h for h in heroes().values() if h.name == name)
@@ -84,9 +85,9 @@ class LoadoutTests(unittest.TestCase):
         # state payloads: the same body picture, minus the classes whose begin actions need
         # encoders that are not here yet.
         instances, entity_vars = loadout.body_instances(0x0400000000002593, allow=loadout.SHIP_STATES)
-        self.assertEqual(len(instances), 10)  # the graphs stay: launchers and gates are structure
-        self.assertEqual(len(entity_vars), 9)
-        self.assertEqual(loadout.body_frame(0x0400000000002593, 1, allow=loadout.SHIP_STATES).count, 1414)
+        self.assertEqual(len(instances), 11)  # the graphs stay: launchers and gates are structure
+        self.assertEqual(len(entity_vars), 19)
+        self.assertEqual(loadout.body_frame(0x0400000000002593, 1, allow=loadout.SHIP_STATES).count, 2205)
         launchers = [
             slot for instance in instances for slot in instance.active
             if instance.graph.index != statescript.HUD.index

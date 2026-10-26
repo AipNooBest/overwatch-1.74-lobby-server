@@ -175,6 +175,45 @@ def body_instances(
             )
         )
     instances += gun_instances(body_guid, allow, entries)
+    if hero is not None:
+        # The hero HUD content graph is resident only once something launches it, and its one
+        # launcher sits in the dispatcher graph 0x004B the body already owns: the client loads
+        # a graph on demand under a launcher whose override names it (this is how 0x120B
+        # arrives under the UI host). Light that launcher with the HUD as a child instance and
+        # the readouts draw for the owning player.
+        dispatcher = next(
+            (i for i in instances if i.graph.index == HERO_HUD_DISPATCHER), None
+        )
+        hud = graph.graph(HERO_HUD_GRAPH)
+        slot = None
+        if dispatcher is not None and hud is not None:
+            for want, node in enumerate(graph.graph(HERO_HUD_DISPATCHER).owner_states()):
+                if node.cls == "STU_37D754C8" and _subscript_target(node) == HERO_HUD_GRAPH:
+                    slot = want
+                    break
+        if slot is not None:
+            hud_index = max(i.index for i in instances) + 1
+            presence = {}
+            for var, value in HERO_HUD_PRESENCE.items():
+                bit = hud.presence_bit(var)
+                if bit is not None:
+                    presence[bit] = value
+            instances.append(
+                statescript.Instance(
+                    hud_index,
+                    statescript.Graph(
+                        HERO_HUD_GRAPH, len(hud.owner_states()), len(hud.presence_vars())
+                    ),
+                    presence=presence,
+                    active={HERO_HUD_GATE: None, HERO_HUD_PRESENTER: None},
+                    parent=(dispatcher.index, slot),
+                )
+            )
+            dispatcher.active[slot] = statescript.subscript(hud_index)
+            entity_vars.setdefault(HERO_HUD_HERO_VAR, statescript.Asset(hero.guid))
+            entity_vars.setdefault(0x076C, statescript.Float(0.0))
+            for var in HERO_HUD_ENTITY_VARS:
+                entity_vars.setdefault(var, statescript.Bool(True))
     return instances, entity_vars
 
 
@@ -199,6 +238,43 @@ HEALTH_VAR = 0x06C4
 HEALTH_MAX_VAR = 0x06C9
 ALIVE_VAR = 0x094C
 BODY_HEALTH = 250.0  # full health; per-hero tables come when the world starts wounding people
+
+# The hero HUD (abilities bar, ammo and health readouts, ult): the content graph and its
+# dispatcher, gate and presenter (the presenter's remote-sync position 13 re-begins it on an
+# H=0 frame). The presence values are keyed by the .01C ids of the bound instance pool; the
+# entity vars are the rest of the presenter's binding list (worknotes S5.2/S6).
+HERO_HUD_DISPATCHER = 0x004B
+HERO_HUD_GRAPH = 0x01CF
+HERO_HUD_GATE = 40
+HERO_HUD_PRESENTER = 28
+HERO_HUD_HERO_VAR = 0x0735
+HERO_HUD_PRESENCE = {
+    0x0A14: statescript.Int(0),
+    0x0756: statescript.Float(BODY_HEALTH),
+    0x075D: statescript.Int(AMMO_MAGAZINE),
+    0x5B85: statescript.Bool(True),
+    0x4498: statescript.Int(3),
+    0x4499: statescript.Int(0),
+    0x2EAB: statescript.Bool(True),
+    0x2EAC: statescript.Bool(True),
+    0x2EAD: statescript.Bool(True),
+    # the rest of the bound pool: the gate watches every bit, so each one gets a value; the
+    # charge candidate (.1B84) rides as an int so the ult readout has a percentage to show
+    0x070F: statescript.Bool(True),
+    0x171B: statescript.Bool(True),
+    0x071D: statescript.Bool(True),
+    0x0028: statescript.Int(0),
+    0x2450: statescript.Bool(True),
+    0x2451: statescript.Bool(True),
+    0x2454: statescript.Bool(True),
+    0x0755: statescript.Float(BODY_HEALTH),  # the maximum the health bar and its number read
+    0x697C: statescript.Bool(True),
+    0x227F: statescript.Bool(True),
+    0x1B84: statescript.Int(50),
+    0x0188: statescript.Bool(True),
+    0x01FE: statescript.Bool(True),
+}
+HERO_HUD_ENTITY_VARS = (0x2E27, 0x0757, 0x0406, 0x45C2, 0x2243, 0x2AD4, 0x73ED, 0x001F)
 
 
 def gun_instances(
