@@ -34,13 +34,14 @@ class LoadoutTests(unittest.TestCase):
         )
 
     def test_hero_frames_are_the_sizes_the_live_run_proved(self):
-        # Unrestricted frames per hero body: instance counts, entity vars and the full snapshot's
-        # bit size (the numbers a regression to the encoder must not change).
+        # Unrestricted frames per hero body: instance counts (body graphs plus the manager and the
+        # weapon scripts that build the gun), entity vars and the full snapshot's bit size (the
+        # numbers a regression to the encoder must not change).
         expected = {
-            "Echo": (8, 6, 1148, 1193),
-            "Genji": (8, 7, 1119, 1164),
-            "Soldier: 76": (9, 4, 883, 928),
-            "Wrecking Ball": (10, 9, 1407, 1452),
+            "Echo": (10, 6, 1340, 1385),
+            "Genji": (10, 7, 1358, 1403),
+            "Soldier: 76": (11, 4, 1116, 1161),
+            "Wrecking Ball": (12, 9, 1615, 1660),
         }
         for name, (graphs, evars, frame_bits, full_bits) in expected.items():
             hero = next(h for h in heroes().values() if h.name == name)
@@ -61,10 +62,11 @@ class LoadoutTests(unittest.TestCase):
         self.assertNotIn(17906, entity_vars)
 
     def test_the_volley_target_points_at_the_gun(self):
-        # The firing frames address the body's first WeaponVolley state by (instance, slot):
-        # Soldier: 76 keeps it in his weapons graph, the sixth of the nine.
+        # The firing frames address the gun's WeaponVolley state by (instance, slot): Soldier: 76
+        # keeps it in his rifle script graph, which rides as its own instance - after the nine body
+        # graphs and the manager - at owner state 10.
         hero = next(h for h in heroes().values() if h.name == "Soldier: 76")
-        self.assertEqual(loadout.volley_target(hero.body), (6, 1))
+        self.assertEqual(loadout.volley_target(hero.body), (11, 10))
         self.assertIsNone(loadout.volley_target(0))
 
     def test_a_volley_entry_grows_the_frame_by_exactly_its_form(self):
@@ -73,17 +75,18 @@ class LoadoutTests(unittest.TestCase):
         base = loadout.body_full_chunk(hero.body, 9, allow=loadout.SHIP_STATES).count
         volley = loadout.body_full_chunk(
             hero.body, 9, allow=loadout.SHIP_STATES,
-            entries={(6, 1): statescript.HasData(statescript.volley_data())},
+            entries={(11, 10): statescript.HasData(statescript.volley_data())},
         ).count
         self.assertEqual(volley, base + 19)  # +2 for the two-bit entry, +18 data, -1 off bit
 
     def test_the_state_allow_list_keeps_structure_and_shrinks_the_picture(self):
-        # The shipped allow-list keeps every graph and launcher and drops a few state payloads: the
-        # same body picture, minus the classes whose begin actions need encoders that are not here yet.
+        # The shipped allow-list keeps every graph and launcher and the gun scripts, and drops a few
+        # state payloads: the same body picture, minus the classes whose begin actions need
+        # encoders that are not here yet.
         instances, entity_vars = loadout.body_instances(0x0400000000002593, allow=loadout.SHIP_STATES)
-        self.assertEqual(len(instances), 8)  # the graphs stay: launchers and gates are structure
+        self.assertEqual(len(instances), 10)  # the graphs stay: launchers and gates are structure
         self.assertEqual(len(entity_vars), 6)
-        self.assertEqual(loadout.body_frame(0x0400000000002593, 1, allow=loadout.SHIP_STATES).count, 1143)
+        self.assertEqual(loadout.body_frame(0x0400000000002593, 1, allow=loadout.SHIP_STATES).count, 1335)
         launchers = [
             slot for instance in instances for slot in instance.active
             if instance.graph.index != statescript.HUD.index

@@ -168,16 +168,137 @@ def body_instances(
                 active=active,
             )
         )
+    instances += gun_instances(body_guid, allow, entries)
     return instances, entity_vars
 
 
+# The manager graph's states a live run proved enough to let the weapon cosmetics build (the
+# census manager run: manager states 39 and 43 with a cosmetic state turn the gloves into the
+# gun). They sit at owner bits 29 and 33 in 1.74's 35-state owner list.
+MANAGER_STATES = (29, 33)
+# The ammo counter is this sync var of the weapon script (index 53 in its sync-var list, bit 8
+# of the presence list); the widget re-reads it whenever the snapshot writes it, so a fresh
+# magazine rides the body snapshot itself. AMMO_VAR is the var, AMMO_MAGAZINE the count.
+AMMO_VAR = 0x0035
+AMMO_MAGAZINE = 30
+
+
+def gun_instances(
+    body_guid: int, allow: set[str] | None, entries: dict[tuple[int, int], statescript.HasData]
+) -> list:
+    """The manager (0x15) and the weapon scripts' instances for a body: the scripts a gun needs.
+
+    A hero's statescript component names the body graphs (body_instances) plus a manager and up
+    to three weapon scripts; the manager starts the cosmetic and animation machinery and a weapon
+    script's CosmeticEntity state builds the view model. With only the body graphs the client
+    shows bare gloves. The cosmetic state needs no data beyond its active bit (the wire class is
+    one bit; the definition it builds must come from the preload list - see content), and the
+    weapon script also carries the ammo var, written here so the counter has a number to show.
+    """
+    record = graph.bodies().get(body_guid)
+    if record is None or not _allowed("STUStatescriptStateCosmeticEntity", allow):
+        return []
+    instances = []
+    for index, script in _gun_plan(body_guid)[1]:
+        g = graph.graph(script)
+        if script == record["manager"]:
+            manager_active = {
+                slot: None
+                for slot in MANAGER_STATES
+                if slot < len(g.owner_states())
+            }
+            for (want, want_slot), value in (entries or {}).items():
+                if want == index and want_slot < len(g.owner_states()):
+                    manager_active[want_slot] = value
+            instances.append(
+                statescript.Instance(
+                    index,
+                    statescript.Graph(
+                        script, len(g.owner_states()), len(g.presence_vars())
+                    ),
+                    active=manager_active,
+                )
+            )
+            continue
+        active = {
+            slot: None
+            for slot, node in enumerate(g.owner_states())
+            if node.cls == "STUStatescriptStateCosmeticEntity"
+        }
+        presence = {}
+        bit = g.presence_bit(AMMO_VAR)
+        if bit is not None:
+            presence[bit] = statescript.Int(AMMO_MAGAZINE)
+        for (want, want_slot), value in (entries or {}).items():
+            if want == index and want_slot < len(g.owner_states()):
+                active[want_slot] = value
+        instances.append(
+            statescript.Instance(
+                index,
+                statescript.Graph(script, len(g.owner_states()), len(g.presence_vars())),
+                presence=presence,
+                active=active,
+            )
+        )
+    return instances
+
+
+def _gun_plan(body_guid: int) -> tuple[int, list[tuple[int, int]]]:
+    """The gun instances as (number of body graphs, [(instance index, weapon graph) ...] including
+    the manager first): the indices body_instances hands out, recomputed for callers that need them
+    before building the instances."""
+    record = graph.bodies().get(body_guid)
+    if record is None:
+        return 0, []
+    plan, index = [], len(record["graphs"]) + 1
+    if record["manager"] is not None and graph.graph(record["manager"]) is not None:
+        plan.append((index, record["manager"]))
+        index += 1
+    for weapon in record["weapons"] or []:
+        if weapon is not None and graph.graph(weapon) is not None:
+            plan.append((index, weapon))
+            index += 1
+    return len(record["graphs"]), plan
+
+
+def gun_defs(body_guid: int) -> list[int]:
+    """The .003 definition guids the body's weapon cosmetics build - the gun models. The client
+    builds a cosmetic only when its definition is resident; the 20505 preload list is where a
+    server says so, and these guids are missing from the captured 1.68 list."""
+    record = graph.bodies().get(body_guid)
+    if record is None:
+        return []
+    defs = []
+    for weapon in record["weapons"] or []:
+        g = graph.graph(weapon) if weapon is not None else None
+        if g is None:
+            continue
+        for node in g.owner_states():
+            if node.cls != "STUStatescriptStateCosmeticEntity":
+                continue
+            holder = node.fields.get("m_entityDef") or {}
+            guid = holder.get("m_entityDef") if isinstance(holder, dict) else None
+            if isinstance(guid, str) and guid.lower().startswith("0x"):
+                defs.append(int(guid, 16))
+    return defs
+
+
 def volley_target(body_guid: int) -> tuple[int, int] | None:
-    """The body's primary WeaponVolley state as (instance index, owner state slot): the first volley
-    in the body's graph order - which is the rifle for Soldier: 76, Ana's and every gun hero whose
-    weapons script the state first. The firing frames light exactly this entry."""
+    """The gun's WeaponVolley state as (instance index, owner state slot): the first volley in the
+    body's weapon scripts - the scripts that also build the view model, and whose volleys drive the
+    firing picture - falling back to the body graphs (the order body_instances walks them). The
+    firing frames light exactly this entry."""
     record = graph.bodies().get(body_guid)
     if record is None:
         return None
+    _, plan = _gun_plan(body_guid)
+    for index, weapon in plan:
+        if weapon == record["manager"]:
+            continue
+        g = graph.graph(weapon)
+        for slot, node in enumerate(g.owner_states()):
+            if node.cls == "STUStatescriptStateWeaponVolley":
+                return index, slot
     for index, entry in enumerate(record["graphs"], start=1):
         if entry["graph"] is None or entry["graph"] in DROP_GRAPHS:
             continue
