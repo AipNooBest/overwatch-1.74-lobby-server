@@ -264,7 +264,6 @@ MODE_GRAPH = Graph(0x13C0, 20, 3)
 MODE_CHILDREN = (Graph(0x0CBB, 69, 13), Graph(0x0C8F, 10, 4), Graph(0x0CB6, 1, 0))
 MODE_TIMER = Graph(0x0BD6, 55, 0)
 MODE_COUNTDOWN = 0x0517  # the assemble countdown, entity scope in the PvP graph's pool
-MODE_HUD_FLAG = 0x07AA  # the game-started bool the mode's announce state writes at begin (worknotes)
 
 
 def world_mode_graph_chunk():
@@ -316,7 +315,7 @@ def mode_chunk(cmfd: int, seconds: float):
             Instance(4, cb6, parent=(1, 21), active={0: None}),
             Instance(5, MODE_TIMER, parent=(1, 14)),
         ],
-        {MODE_COUNTDOWN: Float(seconds), MODE_HUD_FLAG: Bool(True)},
+        {MODE_COUNTDOWN: Float(seconds)},
     )
     return chunk(frame, 0, 3)
 
