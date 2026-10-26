@@ -617,20 +617,6 @@ class Match:
         (OW2 traffic), while ProCore's .sethero kept it 0.5 s, and it showed when the hero select
         screen closed. The client ignores a destroyed id for 30 s, so the new id differs."""
         old = player.body if player.has_body else None
-        if old is not None and self.hero_scripts:
-            # With a scripted body, neither a hero change nor a skin change is survivable yet: the
-            # sequence for replacing a body whose graphs the client already runs (clear, destroy,
-            # recreate) has no live proof; every shape tested stalls on the new body's activation or
-            # drops the match when the old one is destroyed. The pick closes hero select and keeps
-            # the spawned body: the match stays alive and its HUD is the scripted one. Without
-            # scripts the old behaviour stays (any pick recreates, as the skin tests prove).
-            player.select_open = False
-            self.send_controller(player)
-            log.info(
-                "[game] %s: %s picks %s but the scripted body stays (scripted change pending)",
-                self.label(), player.name, hero.name,
-            )
-            return
         if old is not None:
             player.new_body()
         player.hero = hero
