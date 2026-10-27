@@ -138,8 +138,10 @@ def controller_frame(
             bit = synced.presence_bit(var) if synced is not None else None
             if bit is not None:
                 instances[0].presence[bit] = value  # the controller instance's own pool
-            else:
+            elif var < 1 << 32:
                 variables[var] = value  # entity scope: the begin-condition block
+            # else: a mount graph's 48-bit pool id - the entity block's w_var field is 32 bits,
+            # so the id fits only its instance's presence bitmap, which the mount pass lights
     return owner_full_frame(cmfd, instances, variables)
 
 
@@ -285,7 +287,9 @@ def _ui_mount_frame(
                     instance.presence[pool.index(var)] = value
                     variables.pop(var, None)
     variables.update({k: v for k, v in (overrides or {}).items()
-                      if k not in {*UI_HOST_VARS, *MACHINE_VARS, *AMMO_VARS}})
+                      if k not in {*UI_HOST_VARS, *MACHINE_VARS, *AMMO_VARS}
+                      and k < 1 << 32})  # w_var is 32 bits: the panel's 48-bit sync ids have
+    # no wire form in the entity block - presence bitmaps are their only reachable path
     if ring:
         instances[1].remote[MACHINE_MESSAGE] = None
         if widgets:
