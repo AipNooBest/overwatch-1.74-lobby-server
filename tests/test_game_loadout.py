@@ -140,6 +140,24 @@ class LoadoutTests(unittest.TestCase):
         ]
         self.assertTrue(carriers)
 
+    def test_a_hudslot_off_drops_the_state_from_the_active_picture(self):
+        # .hudslot off: the active set is written at init, so a False entry removes the bit
+        # and its presenter leaves the slot unrendered; the other presenters are untouched.
+        hero = next(h for h in heroes().values() if h.name == "Soldier: 76")
+        baseline, _ = loadout.body_instances(hero.body, allow=None)
+        gun = next(i for i in baseline if i.graph.index == 0x254)
+        self.assertIn(64, gun.active)
+        self.assertIn(66, gun.active)
+        switched, _ = loadout.body_instances(hero.body, allow=None, slots={(11, 64): False})
+        gun = next(i for i in switched if i.graph.index == 0x254)
+        self.assertNotIn(64, gun.active)
+        self.assertIn(66, gun.active)
+        # the active picture is a fixed-width bitmap: the byte blob differs, the size does not
+        self.assertNotEqual(
+            loadout.body_full_chunk(hero.body, 9, slots={(11, 64): False}).getvalue(),
+            loadout.body_full_chunk(hero.body, 9).getvalue(),
+        )
+
     def test_the_hud_var_spec_parses_in_the_shipped_kind(self):
         self.assertEqual(loadout.parse_hud_value("0x1B84 100"), (0x1B84, statescript.Int(100)))
         self.assertEqual(loadout.parse_hud_value("2EAB off"), (0x2EAB, statescript.Bool(False)))

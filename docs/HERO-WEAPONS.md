@@ -125,6 +125,12 @@ so an experiment costs a keypress and no restart:
   synced by the controller graph take the rewrite too (its instance pool; others join the entity
   block). The
   variable table with the per-hero sections lives in the worknotes (`hud-vars-2026-10-27.md`).
+- `.hudslot <instance> <state slot> <on|off>` - turn one weapon-script state on or off on the
+  caller's match. The active-state picture is written at init like presence is, so the command
+  re-creates the bodies' snapshots too (or run `.hudvar re` after it). Off drops the slot from
+  the active set: a presenter switched off this way leaves its HUD slot unrendered - this is how
+  the rifle graph's second presenter (the extra weapon card) was told apart from the counter.
+  Bare `.hudslot` lists the rewrites, `.hudslot clear` resets.
 - `.banner <on|off>` - whether new matches start behind the group banner.
 - `.hud` - show the banner to a client already in a world.
 

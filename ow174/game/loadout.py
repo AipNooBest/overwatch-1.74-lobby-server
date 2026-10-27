@@ -89,6 +89,7 @@ def body_instances(
     allow: set[str] | None = None,
     entries: dict[tuple[int, int], statescript.HasData] | None = None,
     hud_vars: dict[int, statescript.Value] | None = None,
+    slots: dict[tuple[int, int], bool] | None = None,
 ) -> tuple[list, dict]:
     """The body's initial graphs as (instances, entity vars) for an owner full frame.
 
@@ -180,7 +181,7 @@ def body_instances(
                 active=active,
             )
         )
-    instances += gun_instances(body_guid, allow, entries, hud_vars)
+    instances += gun_instances(body_guid, allow, entries, hud_vars, slots)
     if hero is not None:
         # The hero HUD content graph is resident only once something launches it, and its one
         # launcher sits in the dispatcher graph 0x004B the body already owns: the client loads
@@ -385,6 +386,7 @@ def gun_instances(
     allow: set[str] | None,
     entries: dict[tuple[int, int], statescript.HasData],
     hud_vars: dict[int, statescript.Value] | None = None,
+    slots: dict[tuple[int, int], bool] | None = None,
 ) -> list:
     """The manager (0x15) and the weapon scripts' instances for a body: the scripts a gun needs.
 
@@ -394,6 +396,9 @@ def gun_instances(
     shows bare gloves. The cosmetic state needs no data beyond its active bit (the wire class is
     one bit; the definition it builds must come from the preload list - see content), and the
     weapon script also carries the ammo var, written here so the counter has a number to show.
+    `slots` (the debug chat's .hudslot) turns single states on or off on top of the static
+    picture, keyed (instance, state slot): off drops the slot from the active set, so the state
+    is inactive at init - a presenter switched off this way leaves its HUD slot unrendered.
     """
     record = graph.bodies().get(body_guid)
     if record is None or not _allowed("STUStatescriptStateCosmeticEntity", allow):
@@ -410,6 +415,12 @@ def gun_instances(
             for (want, want_slot), value in (entries or {}).items():
                 if want == index and want_slot < len(g.owner_states()):
                     manager_active[want_slot] = value
+            for (want, want_slot), on in (slots or {}).items():
+                if want == index and want_slot < len(g.owner_states()):
+                    if on:
+                        manager_active[want_slot] = None
+                    else:
+                        manager_active.pop(want_slot, None)
             instances.append(
                 statescript.Instance(
                     index,
@@ -446,6 +457,12 @@ def gun_instances(
         for (want, want_slot), value in (entries or {}).items():
             if want == index and want_slot < len(g.owner_states()):
                 active[want_slot] = value
+        for (want, want_slot), on in (slots or {}).items():
+            if want == index and want_slot < len(g.owner_states()):
+                if on:
+                    active[want_slot] = None
+                else:
+                    active.pop(want_slot, None)
         instances.append(
             statescript.Instance(
                 index,
@@ -532,11 +549,12 @@ def body_frame(
     allow: set[str] | None = None,
     entries: dict[tuple[int, int], statescript.HasData] | None = None,
     hud_vars: dict[int, statescript.Value] | None = None,
+    slots: dict[tuple[int, int], bool] | None = None,
 ):
     """The owner full frame of the body's scripts, None for a body the data does not describe.
     `cmfd` must exceed the last CmFD sent to this entity, as any owner frame does. `entries`
     lights or stops two-bit states on top of the static picture, keyed (instance, state slot)."""
-    instances, entity_vars = body_instances(body_guid, allow, entries, hud_vars)
+    instances, entity_vars = body_instances(body_guid, allow, entries, hud_vars, slots)
     if not instances:
         return None
     return statescript.owner_full_frame(cmfd, instances, entity_vars, lbss)
@@ -558,9 +576,11 @@ def body_full_chunk(
     allow: set[str] | None = None,
     entries: dict[tuple[int, int], statescript.HasData] | None = None,
     hud_vars: dict[int, statescript.Value] | None = None,
+    slots: dict[tuple[int, int], bool] | None = None,
 ):
     """The second record: the activating full snapshot, wrapped at base 0 (last frame 2, so it
     stays above the create's graph-info frame and cannot queue-stall). The same blob wrapped at a
     numbered base is ignored: a full frame at base 0 is what resets and creates the instances."""
-    frame = body_frame(body_guid, cmfd, allow=allow, entries=entries, hud_vars=hud_vars)
+    frame = body_frame(body_guid, cmfd, allow=allow, entries=entries, hud_vars=hud_vars,
+                       slots=slots)
     return None if frame is None else statescript.chunk(frame, 0, 3)

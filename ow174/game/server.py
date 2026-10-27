@@ -411,6 +411,43 @@ class GameServer:
         match.ui_mount(True)
         match.send_controller(player)
 
+    def hud_slot(self, account_lo: int, spec: str) -> str:
+        """The debug chat's .hudslot: turn a single weapon-script state on or off for the caller's
+        match, keyed (instance, state slot). The activation picture is written at init, so like
+        .hudvar this re-creates the bodies (.hudvar re). Usage: `.hudslot 11 64 off`, bare lists,
+        clear drops all."""
+        with self.lock:
+            pair = next(
+                ((m, p) for m in self.matches for p in m.players
+                 if p.account_lo == account_lo and p.client is not None),
+                None,
+            )
+            if pair is None:
+                return "You are not in a match."
+            match, player = pair
+            text = spec.strip()
+            if text.lower() == "clear":
+                match.hud_slots.clear()
+                self._hud_reapply(match, player)
+                return "HUD slot rewrites cleared, pictures re-created."
+            if not text:
+                listed = ", ".join(
+                    f"{index}:{slot}={'on' if on else 'off'}"
+                    for (index, slot), on in match.hud_slots.items()
+                )
+                return f"HUD slot rewrites: {listed or 'none'}."
+            parts = text.split()
+            on = {"on": True, "off": False}.get(parts[-1].lower()) if len(parts) == 3 else None
+            if on is None:
+                return 'Usage: .hudslot <instance> <state slot> <on|off>, e.g. ".hudslot 11 64 off".'
+            try:
+                key = (int(parts[0], 0), int(parts[1], 0))
+            except ValueError:
+                return 'Usage: .hudslot <instance> <state slot> <on|off>, e.g. ".hudslot 11 64 off".'
+            match.hud_slots[key] = on
+            self._hud_reapply(match, player)
+            return f"Instance {key[0]} state {key[1]}: {'on' if on else 'off'}, pictures re-created."
+
     def set_gun_presenters(self, on: bool) -> int:
         """Flip the weapon-script presenter knob (the debug chat's .pres) and re-send every
         scripted body's picture so the live world follows without a restart. Returns how many

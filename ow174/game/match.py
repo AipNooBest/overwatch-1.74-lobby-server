@@ -227,6 +227,8 @@ class Match:
         # the debug chat's .hudvar rewrites: var id -> statescript value, applied on every
         # body and mount picture this match sends (see loadout.body_instances, heroselect)
         self.hud_vars: dict = {}
+        # the debug chat's .hudslot rewrites: (instance, state slot) -> on/off, applied at init
+        self.hud_slots: dict = {}
 
     def add_player(self, account_lo: int, name: str, hero_guid: int, team: int, tournament: bool) -> Player:
         hero = heroes().get(hero_guid) or heroes()[SOLDIER]
@@ -649,7 +651,8 @@ class Match:
         frame must carry the entry's state data, active or not."""
         cmfd = player.body_script.next_cmfd(self._newest_frame(player))
         chunk = loadout.body_full_chunk(
-            player.hero.body, cmfd, allow=self.hero_states, entries=entries, hud_vars=self.hud_vars
+            player.hero.body, cmfd, allow=self.hero_states, entries=entries,
+            hud_vars=self.hud_vars, slots=self.hud_slots
         )
         if chunk is None:
             return

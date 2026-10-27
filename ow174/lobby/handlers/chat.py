@@ -35,7 +35,8 @@ DEBUG_HELP = (
     "HUD widgets), .mode <on|off> (the game mode's statescript), .hud (the group banner), "
     ".pres <on|off> (weapon-script presenters), .banner <on|off> (matches ride the banner), "
     ".hudvar <var> <value> (rewrite a hero-HUD variable, bare = list, clear = reset, re = "
-    "destroy-create the bodies so rewrites apply), .help"
+    "destroy-create the bodies so rewrites apply), .hudslot <inst> <slot> <on|off> (turn one "
+    "weapon-script state on or off, bare = list, clear = reset), .help"
 )
 
 
@@ -45,7 +46,7 @@ def _match_command(session: Session, channel: dict, text: str) -> bool:
     command, _, rest = text[1:].partition(" ")
     command = command.lower()
     if command not in ("hero", "leave", "help", "hud", "hudroot", "mount", "pres", "banner",
-                       "mode", "hudvar"):
+                       "mode", "hudvar", "hudslot"):
         return False
     if command == "help":
         reply = DEBUG_HELP
@@ -87,6 +88,8 @@ def _match_command(session: Session, channel: dict, text: str) -> bool:
         reply = "Banner sent: mode 5 for the accept window."
     elif command == "hudvar":
         reply = "The game server is off." if game is None else game.hud_var(session.account.account_lo, rest)
+    elif command == "hudslot":
+        reply = "The game server is off." if game is None else game.hud_slot(session.account.account_lo, rest)
     elif command == "pres":
         if game is None:
             reply = "The game server is off."
