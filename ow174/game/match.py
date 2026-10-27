@@ -712,7 +712,7 @@ class Match:
                 log.warning("[game] %s: no hero found in the pick", self.label())
                 return
             skin = self.skin_of(player.account_lo, hero.guid)
-            if hero is not player.hero or skin != player.skin or not player.has_body:
+            if hero.guid != player.hero.guid or skin != player.skin or not player.has_body:
                 self.switch_hero(player, hero)
             if self.assembling():
                 return  # the screen stays open until the heroes are assembled, as in retail

@@ -295,7 +295,9 @@ HERO_HUD_ENTITY_VARS = (0x2E27, 0x0757, 0x0406, 0x45C2, 0x2243, 0x2AD4, 0x73ED, 
 HUD_VAR_USAGE = (
     "Usage: .hudvar <var> <value> - the id in hex, the value in its kind "
     "(e.g. .hudvar 0x1B84 100, .hudvar 0x2EAB off, .hudvar 0x06C4 99.5), "
-    "an explicit bool:/int:/float:/asset: prefix when the id is unlisted, or clear."
+    "an explicit bool:/int:/float:/asset: prefix when the id is unlisted, clear, or re "
+    "(destroy-create the bodies so the rewrites apply: a value lands only as the instance "
+    "initializes)."
 )
 
 

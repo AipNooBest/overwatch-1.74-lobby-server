@@ -113,13 +113,15 @@ so an experiment costs a keypress and no restart:
 - `.mount <on|off>` - destroy (off) or re-create (on) the HUD widget instances on the live mount.
 - `.mode <on|off>` - send (or drop, with a variables-only frame) the game mode's statescript.
 - `.pres <on|off>` - the weapon scripts' UXPresenter states; every scripted body re-sends.
-- `.hudvar <var> <value>` - rewrite one hero-HUD variable on the caller's match and re-create the
-  pictures that carry it, since presence values apply only when their instances initialize (the
-  bodies' snapshots, the UI mount without and with its widgets, the controller frame):
+- `.hudvar <var> <value>` - rewrite one hero-HUD variable on the caller's match. Presence and the
+  entity block are read while an instance initializes, and the re-created pictures (snapshots, the
+  UI mount, the controller) are re-syncs of the live instances - a rewrite therefore shows up only
+  when the body initializes: `.hudvar re` forces that, destroy-creating the caller's bodies under
+  new ids (the switch path) with the rewrites inside.
   `.hudvar 0x1B84 100` feeds the ult charge,
   `.hudvar 0x2EAB off` flips a flag, `.hudvar 0x06C4 99.5` the health float; the value keeps the
   variable's shipped kind (see `loadout.hud_var_default`), an unknown id says its kind explicitly
-  (`bool:/int:/float:`), bare `.hudvar` lists the current rewrites, `.hudvar clear` resets. Ids
+  (`bool:/int:/float:/asset:`), bare `.hudvar` lists the current rewrites, `.hudvar clear` resets. Ids
   synced by the controller graph take the rewrite too (its instance pool; others join the entity
   block). The
   variable table with the per-hero sections lives in the worknotes (`hud-vars-2026-10-27.md`).

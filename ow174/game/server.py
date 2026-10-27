@@ -382,6 +382,13 @@ class GameServer:
                 match.hud_vars.clear()
                 self._hud_reapply(match, player)
                 return "HUD var rewrites cleared, pictures re-created."
+            if text.lower() == "re":
+                # presence and the entity block land only while an instance initializes: the
+                # re-sent full frames of the live bodies are re-syncs the client replays without
+                # re-reading them. A real destroy-create (the switch path, new id, the rewrites
+                # inside) is what makes a rewrite visible.
+                match.switch_hero(player, player.hero)
+                return "Bodies re-created under new ids, rewrites applied at init."
             if not text:
                 listed = ", ".join(f"{var:#06x}={_value_text(v)}" for var, v in match.hud_vars.items())
                 return f"HUD var rewrites: {listed or 'none'}."

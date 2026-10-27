@@ -34,7 +34,8 @@ DEBUG_HELP = (
     ".hero <name>, .leave, .hudroot (ring the HUD layer listener), .mount <on|off> (re-create the "
     "HUD widgets), .mode <on|off> (the game mode's statescript), .hud (the group banner), "
     ".pres <on|off> (weapon-script presenters), .banner <on|off> (matches ride the banner), "
-    ".hudvar <var> <value> (rewrite a hero-HUD variable, bare = list, clear = reset), .help"
+    ".hudvar <var> <value> (rewrite a hero-HUD variable, bare = list, clear = reset, re = "
+    "destroy-create the bodies so rewrites apply), .help"
 )
 
 
