@@ -154,6 +154,13 @@ They must start as transitions (the state on, then the event), as the volley doe
 presentation is the same mechanism: the hero-specific ability graph, its `Anim`/`UXPresenter`
 slots listed here.
 
+`UXPresenter` states do ship on the weapon scripts (`GUN_PRESENTERS` in `loadout.py`), but only
+the ones with a number to show: a script whose presenters read the ammo var activates those
+alone - the bare ones next to a counter draw a second weapon card that is not a weapon (the
+rifle graph's infinity sign; worknotes §6h). A script whose presenters read no ammo var at all -
+the melee hammer, the staff - ships its bare card as is: there it is the whole readout. `.hudslot`
+overrides the policy per state, live.
+
 | hero | weapon script | cosmetic (def) | volley | anim | presenter | ability |
 |---|---|---|---|---|---|---|
 | Ana | 0xb94 | 59=0x040000000000159C | 5, 43 | 8 | 65, 66 | - |

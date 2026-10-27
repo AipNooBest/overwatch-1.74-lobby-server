@@ -140,21 +140,39 @@ class LoadoutTests(unittest.TestCase):
         ]
         self.assertTrue(carriers)
 
+    def test_the_ammo_counter_outranks_the_bare_presenters(self):
+        # The rifle graph presents three slots but only one reads the ammo var; the bare two
+        # would draw a second weapon card, so the shipped picture activates the counter alone.
+        hero = next(h for h in heroes().values() if h.name == "Soldier: 76")
+        instances, _ = loadout.body_instances(hero.body, allow=None)
+        gun = next(i for i in instances if i.graph.index == 0x254)
+        self.assertIn(66, gun.active)
+        self.assertNotIn(64, gun.active)
+        self.assertNotIn(65, gun.active)
+        # a melee script has no counter at all: its bare card is the whole readout and stays
+        instances, _ = loadout.body_instances(
+            next(h for h in heroes().values() if h.name == "Reinhardt").body, allow=None
+        )
+        gun = next(i for i in instances if i.graph.index == 0x48)
+        self.assertIn(40, gun.active)
+
     def test_a_hudslot_off_drops_the_state_from_the_active_picture(self):
         # .hudslot off: the active set is written at init, so a False entry removes the bit
-        # and its presenter leaves the slot unrendered; the other presenters are untouched.
+        # and its presenter leaves the slot unrendered; on re-adds a slot the policy dropped.
         hero = next(h for h in heroes().values() if h.name == "Soldier: 76")
         baseline, _ = loadout.body_instances(hero.body, allow=None)
         gun = next(i for i in baseline if i.graph.index == 0x254)
-        self.assertIn(64, gun.active)
         self.assertIn(66, gun.active)
-        switched, _ = loadout.body_instances(hero.body, allow=None, slots={(11, 64): False})
-        gun = next(i for i in switched if i.graph.index == 0x254)
         self.assertNotIn(64, gun.active)
-        self.assertIn(66, gun.active)
+        switched, _ = loadout.body_instances(
+            hero.body, allow=None, slots={(11, 64): True, (11, 66): False}
+        )
+        gun = next(i for i in switched if i.graph.index == 0x254)
+        self.assertIn(64, gun.active)
+        self.assertNotIn(66, gun.active)
         # the active picture is a fixed-width bitmap: the byte blob differs, the size does not
         self.assertNotEqual(
-            loadout.body_full_chunk(hero.body, 9, slots={(11, 64): False}).getvalue(),
+            loadout.body_full_chunk(hero.body, 9, slots={(11, 66): False}).getvalue(),
             loadout.body_full_chunk(hero.body, 9).getvalue(),
         )
 

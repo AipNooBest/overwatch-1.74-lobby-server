@@ -236,7 +236,11 @@ def body_instances(
 
 # The weapon scripts' UXPresenter states light together with the cosmetics: they are the gun's own
 # HUD readouts, and the in-game debug chat flips them (.pres) without a server restart, so the
-# knob lives here and the encoder reads it on every snapshot.
+# knob lives here and the encoder reads it on every snapshot. A script that has a presenter reading
+# the ammo var gets only those: every gun graph also carries a presenter with no number to present
+# (the rifle graph's second weapon card with the infinity sign), and lighting it shows a weapon the
+# gun does not have. Scripts whose presenters all read no ammo var - the melee and the staff -
+# keep them: there the bare card is the whole readout.
 GUN_PRESENTERS = True
 # The manager graph's states a live run proved enough to let the weapon cosmetics build (the
 # census manager run: manager states 39 and 43 with a cosmetic state turn the gloves into the
@@ -381,6 +385,31 @@ def parse_hud_value(spec: str) -> tuple[int, statescript.Value]:
     return (var, statescript.Float(float(number))) if kind == "float" else (var, statescript.Int(number))
 
 
+def _presenter_slots(g) -> tuple[set, set]:
+    """(every UXPresenter state slot, the slots of presenters whose bindings read the ammo var):
+    the script's own counters. A dynamic identifier indexes the graph's synced-var list, but the
+    widget configs use larger ids for widget handles, so only in-range ones count as var reads."""
+    sv = list(g.sync_vars)
+
+    def reads_ammo(fields):
+        stack = [fields]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, dict):
+                if node.get("$") == "STUConfigVarDynamic":
+                    ident = node.get("m_identifier")
+                    if isinstance(ident, int) and ident < len(sv) and sv[ident].var == AMMO_VAR:
+                        return True
+                stack.extend(node.values())
+            elif isinstance(node, list):
+                stack.extend(node)
+        return False
+
+    every = {slot for slot, node in enumerate(g.owner_states())
+             if node.cls == "STUStatescriptStateUXPresenter"}
+    return every, {slot for slot in every if reads_ammo(g.owner_states()[slot].fields)}
+
+
 def gun_instances(
     body_guid: int,
     allow: set[str] | None,
@@ -440,6 +469,13 @@ def gun_instances(
             # slots in the weapon graph; the per-hero tables in docs/HERO-WEAPONS.md list them).
             # The body graphs' presenters stay dark: those are the placement screens.
         }
+        if GUN_PRESENTERS:
+            every, with_ammo = _presenter_slots(g)
+            if with_ammo:
+                # The gun shows exactly the cards it has counters for; the bare presenters next
+                # to a counter would show a weapon the gun does not have.
+                for slot in every - with_ammo:
+                    active.pop(slot, None)
         presence = {}
         bit = g.presence_bit(AMMO_VAR)
         if bit is not None:
