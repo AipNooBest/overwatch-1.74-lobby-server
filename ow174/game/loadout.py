@@ -225,8 +225,11 @@ def body_instances(
             for var in HERO_HUD_ENTITY_VARS:
                 entity_vars.setdefault(var, statescript.Bool(True))
             for var, value in (hud_vars or {}).items():
-                if hud.presence_bit(var) is None:
-                    entity_vars[var] = value  # the entity-scope bindings and the unbound ids
+                if hud.presence_bit(var) is None and var < 1 << 32:
+                    # the entity-scope bindings and the unbound ids; 48-bit .01B identifiers of
+                    # the mount graphs have no wire form here (w_var is 32 bits) - the mount pass
+                    # lights them as presence
+                    entity_vars[var] = value
     return instances, entity_vars
 
 

@@ -112,6 +112,20 @@ class LoadoutTests(unittest.TestCase):
             loadout.body_full_chunk(hero.body, 9).count,
         )
 
+    def test_a_hud_var_48_bit_id_skips_the_entity_block(self):
+        # The mount graphs' .01B identifiers are 48-bit and the entity block cannot carry them
+        # (w_var is 32 bits): a reapply with such an id must skip the body block, not raise
+        # mid-snapshot and abort the mount and controller passes that follow.
+        from ow174.game import heroselect
+
+        hero = next(h for h in heroes().values() if h.name == "Soldier: 76")
+        big = heroselect.MACHINE_VARS[0]
+        _instances, entity_vars = loadout.body_instances(
+            hero.body, allow=None, hud_vars={big: statescript.Bool(True)}
+        )
+        self.assertNotIn(big, entity_vars)
+        loadout.body_full_chunk(hero.body, 9, hud_vars={big: statescript.Bool(True)})
+
     def test_a_hud_var_rewrite_reaches_the_weapon_scripts(self):
         # The weapon scripts sync their own counters (.0035); the rewrite reaches them through
         # the same dict, so the ammo digits can be tested live without a code change.
