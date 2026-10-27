@@ -295,7 +295,7 @@ HERO_HUD_ENTITY_VARS = (0x2E27, 0x0757, 0x0406, 0x45C2, 0x2243, 0x2AD4, 0x73ED, 
 HUD_VAR_USAGE = (
     "Usage: .hudvar <var> <value> - the id in hex, the value in its kind "
     "(e.g. .hudvar 0x1B84 100, .hudvar 0x2EAB off, .hudvar 0x06C4 99.5), "
-    "an explicit bool:/int:/float: prefix when the id is unlisted, or clear."
+    "an explicit bool:/int:/float:/asset: prefix when the id is unlisted, or clear."
 )
 
 
@@ -320,7 +320,7 @@ def hud_var_default(var: int) -> statescript.Value | None:
 def parse_hud_value(spec: str) -> tuple[int, statescript.Value]:
     """'.hudvar <var> <value>' as (var, value): the id in hex (0x-optional), the value in the
     variable's shipped kind - on/off for the flags, a whole number for the ints, with a decimal
-    point for the floats - or any kind explicitly with a bool:/int:/float: prefix. Unknown ids
+    point for the floats - or any kind explicitly with a bool:/int:/float:/asset: prefix. Unknown ids
     need the explicit kind: the shipped kind is what keeps a frame the length the client knows."""
     var_token, _, value_token = spec.strip().partition(" ")
     value_token = value_token.strip()
@@ -332,14 +332,14 @@ def parse_hud_value(spec: str) -> tuple[int, statescript.Value]:
         raise ValueError("No value. " + HUD_VAR_USAGE)
     default = hud_var_default(var)
     kind = None
-    for prefix in ("bool:", "int:", "float:"):
+    for prefix in ("bool:", "int:", "float:", "asset:"):
         if value_token.lower().startswith(prefix):
             kind, value_token = prefix[:-1], value_token[len(prefix):]
             break
     if kind is None:
         if default is None:
             raise ValueError(
-                f"{var:#06x} is in no shipped list; say the kind (bool:/int:/float:). " + HUD_VAR_USAGE
+                f"{var:#06x} is in no shipped list; say the kind (bool:/int:/float:/asset:). " + HUD_VAR_USAGE
             )
         kind = {statescript.Bool: "bool", statescript.Int: "int", statescript.Float: "float",
                 statescript.Asset: "asset"}[type(default)]

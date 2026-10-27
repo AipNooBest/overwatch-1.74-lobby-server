@@ -150,6 +150,10 @@ class LoadoutTests(unittest.TestCase):
         self.assertEqual(
             loadout.parse_hud_value("2450 bool:0"), (0x2450, statescript.Bool(False))
         )
+        self.assertEqual(
+            loadout.parse_hud_value("2E27 asset:4000000000003CF"),
+            (0x2E27, statescript.Asset(0x04000000000003CF)),
+        )  # an asset: prefix reaches a Bool-shipped id too (the p-series probes)
         with self.assertRaises(ValueError):
             loadout.parse_hud_value("0x9999 1")  # unknown id: say the kind explicitly
 
