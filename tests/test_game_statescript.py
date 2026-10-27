@@ -89,6 +89,13 @@ class StatescriptTests(unittest.TestCase):
         )
         self.assertGreater(over.count, base.count)
 
+    def test_hud_var_overrides_reach_the_mount(self):
+        # .hudvar on the mount pools: a machine instance's synced var lights its presence bit at
+        # the .01B position and the chunk grows past the shipped picture.
+        base = heroselect.world_ui_chunk(9)
+        over = heroselect.world_ui_chunk(9, overrides={heroselect.MACHINE_VARS[3]: Bool(True)})
+        self.assertGreater(over.count, base.count)
+
     def test_an_owner_ack_is_56_bits(self):
         self.assertEqual(owner_ack(123500).count, 56)
 

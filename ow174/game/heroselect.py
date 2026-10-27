@@ -164,6 +164,17 @@ MACHINE_PANEL = 22  # the SubScript state whose GWO is the hero panel graph
 AMMO_WIDGET = Graph(0x20E7, 5, 5, 4)
 HERO_PANEL = Graph(0x183C, 1, 0, 1)
 PANEL_VARS = (0x0520, 0x4580, 0x2F47, 0x57A8, 0x2C2A, 0x43CE, 0x2613, 0x099B, 0x1A3C)
+# The mount graphs' own instance-scope pools (.01B m_syncVars, the 48-bit identifier index;
+# Temp/opencode dumps 2026-10-27): the presence bitmap positions of 041A and 0x120B, and the
+# nine entity-scope identifiers of the hero panel, which the .0520-style PANEL_VARS are not.
+UI_HOST_VARS = (0xE59CBE8C97EC, 0xE59C3F8C97EC, 0xE59C1C8C97EC, 0xE59C0F8C97EC,
+                0xE59C198C97EC, 0xE59CA68C97EC, 0xE59C728C97EC)
+MACHINE_VARS = (0x6C6710B0500C, 0x6C6713B0500C, 0x6C6794B0500C, 0x6C67D5B0500C,
+                0x6C67CAB0500C, 0x6C67CBB0500C, 0x6C676DB0500C, 0x6C672FB0500C)
+AMMO_VARS = (0xED6052B267A6, 0xED6053B267A6, 0xED6013B267A6, 0xED60E0B267A6, 0xED603AB267A6)
+PANEL_ENTITY_VARS = (0xC4E84D8FC47F, 0xC4E8ED8FC47F, 0xC4E82A8FC47F, 0xC4E8C58FC47F,
+                     0xC4E8478FC47F, 0xC4E8A38FC47F, 0xC4E87E8FC47F, 0xC4E8F68FC47F,
+                     0xC4E8518FC47F)
 
 
 def world_ui_graph_chunk():
@@ -256,7 +267,25 @@ def _ui_mount_frame(
     variables = dict.fromkeys(
         HUD_BEGIN_VARS + UI_HUD_VARS + PANEL_VARS + (0x2AD4, 0x73ED, 0x001F), Bool(True)
     )
-    variables.update(overrides or {})  # .hudvar: the live rewrite wins over the shipped values
+    if overrides:
+        # .hudvar: an id owned by a mounted graph's instance pool joins that instance's presence
+        # at its bit; anything else (the panel's nine entity ids, unlisted probes) rides the
+        # entity block.
+        pools = {
+            UI_HOST.index: UI_HOST_VARS,
+            UI_MACHINE.index: MACHINE_VARS,
+            AMMO_WIDGET.index: AMMO_VARS,
+        }
+        for instance in instances:
+            pool = pools.get(instance.graph.index)
+            if pool is None:
+                continue
+            for var, value in overrides.items():
+                if var in pool:
+                    instance.presence[pool.index(var)] = value
+                    variables.pop(var, None)
+    variables.update({k: v for k, v in (overrides or {}).items()
+                      if k not in {*UI_HOST_VARS, *MACHINE_VARS, *AMMO_VARS}})
     if ring:
         instances[1].remote[MACHINE_MESSAGE] = None
         if widgets:
