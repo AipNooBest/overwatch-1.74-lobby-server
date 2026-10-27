@@ -130,7 +130,8 @@ so an experiment costs a keypress and no restart:
   re-creates the bodies' snapshots too (or run `.hudvar re` after it). Off drops the slot from
   the active set: a presenter switched off this way leaves its HUD slot unrendered - this is how
   the rifle graph's second presenter (the extra weapon card) was told apart from the counter.
-  Bare `.hudslot` lists the rewrites, `.hudslot clear` resets.
+  Bare `.hudslot` lists the rewrites, `.hudslot clear` resets. Which presenter is which for
+  every hero, and the proven variable semantics: `HUD-VARIABLES.md` §2 and §3.
 - `.banner <on|off>` - whether new matches start behind the group banner.
 - `.hud` - show the banner to a client already in a world.
 
