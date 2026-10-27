@@ -244,8 +244,13 @@ MANAGER_STATES = (29, 33)
 # The ammo counter is this sync var of the weapon script (index 53 in its sync-var list, bit 8
 # of the presence list); the widget re-reads it whenever the snapshot writes it, so a fresh
 # magazine rides the body snapshot itself. AMMO_VAR is the var, AMMO_MAGAZINE the count.
+# WEAPON_GATE is the rifle scripts' activity var: while its presence holds a non-zero int the
+# script presents its weapon (HUD counter, view model); .0035 and .00C6 are then its numbers.
 AMMO_VAR = 0x0035
 AMMO_MAGAZINE = 30
+WEAPON_GATE_VAR = 0x001C
+WEAPON_GATE_VALUE = 50
+AMMO_CAP_VAR = 0x00C6
 # The hero HUD's readouts are entity variables of the body (the 1.23 in-process reference wrote
 # them every tick): the current and maximum health the bar and the numbers show, and the flag
 # the readouts hide behind while it says otherwise. A client on a server with no damage takes
@@ -312,6 +317,8 @@ def hud_var_default(var: int) -> statescript.Value | None:
         return statescript.Float(0.0)
     if var == ALIVE_VAR:
         return statescript.Bool(True)
+    if var in (WEAPON_GATE_VAR, AMMO_VAR, 0x00C6):
+        return statescript.Int(1)  # the weapon scripts' gate and two counter numbers
     from ow174.game import heroselect  # here: heroselect pulls the screens in, keep it lazy
 
     if var in heroselect.PANEL_VARS or var in HERO_HUD_ENTITY_VARS:
@@ -426,6 +433,12 @@ def gun_instances(
         bit = g.presence_bit(AMMO_VAR)
         if bit is not None:
             presence[bit] = statescript.Int(AMMO_MAGAZINE)
+        gate = g.presence_bit(WEAPON_GATE_VAR)
+        if gate is not None:
+            presence[gate] = statescript.Int(WEAPON_GATE_VALUE)
+        cap = g.presence_bit(AMMO_CAP_VAR)
+        if cap is not None:
+            presence[cap] = statescript.Int(AMMO_MAGAZINE)
         for var, value in (hud_vars or {}).items():
             wbit = g.presence_bit(var)
             if wbit is not None:
