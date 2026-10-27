@@ -94,6 +94,51 @@ class LoadoutTests(unittest.TestCase):
         ]
         self.assertTrue(launchers)  # the SubScript launchers remain on
 
+    def test_a_hud_var_rewrite_wins_over_the_shipped_values(self):
+        # .hudvar: the override writes the same presence bit the shipped value does, and a
+        # variable the hero HUD graph does not sync rides the entity block instead. Replacing an
+        # int by an int keeps the frame the size the live run proved (the kind must not change).
+        hero = next(h for h in heroes().values() if h.name == "Soldier: 76")
+        bit = loadout.graph.graph(loadout.HERO_HUD_GRAPH).presence_bit(0x1B84)
+        instances, entity_vars = loadout.body_instances(
+            hero.body, allow=None,
+            hud_vars={0x1B84: statescript.Int(100), 0x2E27: statescript.Bool(False)},
+        )
+        hud_instance = next(i for i in instances if i.graph.index == loadout.HERO_HUD_GRAPH)
+        self.assertEqual(hud_instance.presence[bit], statescript.Int(100))
+        self.assertEqual(entity_vars[0x2E27], statescript.Bool(False))
+        self.assertEqual(
+            loadout.body_full_chunk(hero.body, 9, hud_vars={0x1B84: statescript.Int(100)}).count,
+            loadout.body_full_chunk(hero.body, 9).count,
+        )
+
+    def test_a_hud_var_rewrite_reaches_the_weapon_scripts(self):
+        # The weapon scripts sync their own counters (.0035); the rewrite reaches them through
+        # the same dict, so the ammo digits can be tested live without a code change.
+        hero = next(h for h in heroes().values() if h.name == "Soldier: 76")
+        instances, _ = loadout.body_instances(
+            hero.body, allow=None, hud_vars={loadout.AMMO_VAR: statescript.Int(7)}
+        )
+        carriers = [
+            instance for instance in instances
+            if (bit := loadout.graph.graph(instance.graph.index).presence_bit(loadout.AMMO_VAR))
+            is not None and instance.presence.get(bit) == statescript.Int(7)
+        ]
+        self.assertTrue(carriers)
+
+    def test_the_hud_var_spec_parses_in_the_shipped_kind(self):
+        self.assertEqual(loadout.parse_hud_value("0x1B84 100"), (0x1B84, statescript.Int(100)))
+        self.assertEqual(loadout.parse_hud_value("2EAB off"), (0x2EAB, statescript.Bool(False)))
+        self.assertEqual(loadout.parse_hud_value("2EAB on"), (0x2EAB, statescript.Bool(True)))
+        self.assertEqual(loadout.parse_hud_value("06C4 99.5"), (0x06C4, statescript.Float(99.5)))
+        self.assertEqual(loadout.parse_hud_value("1B84 float:7"), (0x1B84, statescript.Float(7.0)))
+        self.assertEqual(loadout.parse_hud_value("0756 int:250"), (0x0756, statescript.Int(250)))
+        self.assertEqual(
+            loadout.parse_hud_value("2450 bool:0"), (0x2450, statescript.Bool(False))
+        )
+        with self.assertRaises(ValueError):
+            loadout.parse_hud_value("0x9999 1")  # unknown id: say the kind explicitly
+
 
 if __name__ == "__main__":
     unittest.main()

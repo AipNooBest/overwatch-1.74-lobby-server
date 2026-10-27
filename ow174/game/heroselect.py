@@ -171,7 +171,7 @@ def world_ui_graph_chunk():
     )
 
 
-def world_ui_chunk(cmfd: int):
+def world_ui_chunk(cmfd: int, overrides: dict | None = None):
     """The HUD's own mount on a server-created UI entity: the widget's visibility predicate
     resolves through the UI instance's owner and accepts only an entity whose GetWorld is a game
     world. GetWorld is the entity's registration world (entity+0x120), and every entity the
@@ -186,10 +186,10 @@ def world_ui_chunk(cmfd: int):
     node of the graph is networked, so only an owner-frame bit lights it) creates HUD_Root and the
     layers. 20E4 rides next to it with the begin variables the screens wait on. Same variables as
     the controller mount, wrapped at base 0 like the body's activating snapshot."""
-    return chunk(_ui_mount_frame(cmfd, False), 0, 3)
+    return chunk(_ui_mount_frame(cmfd, False, overrides=overrides), 0, 3)
 
 
-def ui_hud_message():
+def ui_hud_message(overrides: dict | None = None):
     """Ring the layer machine's message listener: the same mount re-sent as an H=0 remote-sync
     frame with the .0C47 listener's bit (m_remoteSyncNodes position 22 of 0x120B) on. In the
     client's own boot UI the message arrives natively when the game begins; on our world-owned
@@ -197,10 +197,12 @@ def ui_hud_message():
     this frame is its match-start, and the begin runs the client-side subgraph that builds
     HUD_Root. The frame lists the whole mount again (a full frame carries everything) and the
     same variables; the caller sends it through the mount's own stream."""
-    return _ui_mount_frame(0, True)
+    return _ui_mount_frame(0, True, overrides=overrides)
 
 
-def _ui_mount_frame(cmfd: int, ring: bool, magazine: int = 30, widgets: bool = True):
+def _ui_mount_frame(
+    cmfd: int, ring: bool, magazine: int = 30, widgets: bool = True, overrides: dict | None = None
+):
     """The world UI entity's picture: the 041A root, its layer machine, the controller-shape HUD
     graph, and the two content widgets the machine's message builds around in a real client - the
     ammo counter (0x20E7, its number is the instance variable at presence bit 2) and the hero
@@ -241,6 +243,7 @@ def _ui_mount_frame(cmfd: int, ring: bool, magazine: int = 30, widgets: bool = T
     variables = dict.fromkeys(
         HUD_BEGIN_VARS + UI_HUD_VARS + PANEL_VARS + (0x2AD4, 0x73ED, 0x001F), Bool(True)
     )
+    variables.update(overrides or {})  # .hudvar: the live rewrite wins over the shipped values
     if ring:
         instances[1].remote[MACHINE_MESSAGE] = None
         if widgets:
@@ -249,11 +252,11 @@ def _ui_mount_frame(cmfd: int, ring: bool, magazine: int = 30, widgets: bool = T
     return owner_full_frame(cmfd, instances, variables)
 
 
-def ui_mount_frame(cmfd: int, widgets: bool):
+def ui_mount_frame(cmfd: int, widgets: bool, overrides: dict | None = None):
     """The mount re-sent as an owner snapshot, with or without the widget instances (the .mount
     debug switch): dropping them from a full frame destroys the instances and their states, so
     sending them again runs every presenter's begin afresh."""
-    return chunk(_ui_mount_frame(cmfd, False, widgets=widgets), 0, 3)
+    return chunk(_ui_mount_frame(cmfd, False, widgets=widgets, overrides=overrides), 0, 3)
 
 
 # The game mode entity's statescript, Practice Range (worknotes/mode-graph-2026-10-26.md): 0x13C0

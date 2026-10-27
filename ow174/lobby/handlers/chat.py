@@ -33,7 +33,8 @@ def chat(session: Session, value: dict) -> None:
 DEBUG_HELP = (
     ".hero <name>, .leave, .hudroot (ring the HUD layer listener), .mount <on|off> (re-create the "
     "HUD widgets), .mode <on|off> (the game mode's statescript), .hud (the group banner), "
-    ".pres <on|off> (weapon-script presenters), .banner <on|off> (matches ride the banner), .help"
+    ".pres <on|off> (weapon-script presenters), .banner <on|off> (matches ride the banner), "
+    ".hudvar <var> <value> (rewrite a hero-HUD variable, bare = list, clear = reset), .help"
 )
 
 
@@ -42,7 +43,8 @@ def _match_command(session: Session, channel: dict, text: str) -> bool:
     game = session.server.game
     command, _, rest = text[1:].partition(" ")
     command = command.lower()
-    if command not in ("hero", "leave", "help", "hud", "hudroot", "mount", "pres", "banner", "mode"):
+    if command not in ("hero", "leave", "help", "hud", "hudroot", "mount", "pres", "banner",
+                       "mode", "hudvar"):
         return False
     if command == "help":
         reply = DEBUG_HELP
@@ -82,6 +84,8 @@ def _match_command(session: Session, channel: dict, text: str) -> bool:
     elif command == "hud":
         session.server.matchmaker.banner_now(session)
         reply = "Banner sent: mode 5 for the accept window."
+    elif command == "hudvar":
+        reply = "The game server is off." if game is None else game.hud_var(session.account.account_lo, rest)
     elif command == "pres":
         if game is None:
             reply = "The game server is off."

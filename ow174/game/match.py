@@ -224,6 +224,9 @@ class Match:
         self.ui_phase_at = 0.0  # when the next step of the mount sequence may go
         self.ui_remount = 0  # 0 idle, 1 the bare frame is due next, 2 the widgets return
         self.mount_widgets = True  # the widget instances ride the mount picture
+        # the debug chat's .hudvar rewrites: var id -> statescript value, applied on every
+        # body and mount picture this match sends (see loadout.body_instances, heroselect)
+        self.hud_vars: dict = {}
 
     def add_player(self, account_lo: int, name: str, hero_guid: int, team: int, tournament: bool) -> Player:
         hero = heroes().get(hero_guid) or heroes()[SOLDIER]
@@ -556,7 +559,7 @@ class Match:
         to an entity it did not make itself."""
         if self.ui_script is None or self.ui_player is None or self.ui_player.client is None:
             return
-        self.ui_script.full_frame(heroselect.ui_hud_message())
+        self.ui_script.full_frame(heroselect.ui_hud_message(self.hud_vars))
         log.info("[game] %s: UI entity listener message sent", self.label())
 
     def ui_mount(self, widgets: bool) -> None:
@@ -568,7 +571,7 @@ class Match:
             return
         self.mount_widgets = widgets
         cmfd = self.ui_script.next_cmfd(self._newest_frame(self.ui_player))
-        frame = heroselect.ui_mount_frame(cmfd, widgets)
+        frame = heroselect.ui_mount_frame(cmfd, widgets, overrides=self.hud_vars)
         last = max(self.ui_script.last + 1, 3)
         update = EntityUpdate(UI_ENTITY, chunk=frame)
         update.chunk_last = last
@@ -644,7 +647,9 @@ class Match:
         `entries` patches two-bit states (the volley) on top of the static picture; every such
         frame must carry the entry's state data, active or not."""
         cmfd = player.body_script.next_cmfd(self._newest_frame(player))
-        chunk = loadout.body_full_chunk(player.hero.body, cmfd, allow=self.hero_states, entries=entries)
+        chunk = loadout.body_full_chunk(
+            player.hero.body, cmfd, allow=self.hero_states, entries=entries, hud_vars=self.hud_vars
+        )
         if chunk is None:
             return
         last = max(player.body_script.last + 1, 3)
@@ -663,7 +668,7 @@ class Match:
         """The HUD's full snapshot on the world's UI entity (heroselect.world_ui_chunk): the same
         CmFD and numbering rules as the body's picture, sent once."""
         cmfd = self.ui_script.next_cmfd(self._newest_frame(self.ui_player))
-        update = EntityUpdate(UI_ENTITY, chunk=heroselect.world_ui_chunk(cmfd))
+        update = EntityUpdate(UI_ENTITY, chunk=heroselect.world_ui_chunk(cmfd, self.hud_vars))
         last = max(self.ui_script.last + 1, 3)
         update.chunk_last = last
         update.stream = self.ui_script

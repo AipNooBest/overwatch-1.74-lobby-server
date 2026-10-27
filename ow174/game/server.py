@@ -50,6 +50,12 @@ LEAVE_GAME = 20304
 SIO_UDP_CONNRESET = 0x9800000C
 
 
+def _value_text(value) -> str:
+    """A statescript value as the chat shows it: Bool(True), Int(100), Float(99.5), Asset."""
+    raw = getattr(value, "value", getattr(value, "guid", None))
+    return f"{type(value).__name__}({raw})" if raw is not None else type(value).__name__
+
+
 def _ignore_connection_resets(sock: socket.socket) -> None:
     """On Windows a closed game's ICMP "port unreachable" comes back as an error from the next
     recvfrom; SIO_UDP_CONNRESET turns that off. Python's sock.ioctl does not take it, so WSAIoctl."""
@@ -354,6 +360,36 @@ class GameServer:
                         match.switch_hero(player, hero)
                         return True
         return False
+
+    def hud_var(self, account_lo: int, spec: str) -> str:
+        """The debug chat's .hudvar: rewrite one hero-HUD variable on the caller's match and
+        re-send the pictures that carry it (the bodies' snapshots and the UI mount). A bare
+        command lists the current rewrites, clear drops them."""
+        with self.lock:
+            match = next(
+                (m for m in self.matches for p in m.players
+                 if p.account_lo == account_lo and p.client is not None),
+                None,
+            )
+            if match is None:
+                return "You are not in a match."
+            text = spec.strip()
+            if text.lower() == "clear":
+                match.hud_vars.clear()
+                match.resnapshot_bodies()
+                match.ui_mount(match.mount_widgets)
+                return "HUD var rewrites cleared, pictures re-sent."
+            if not text:
+                listed = ", ".join(f"{var:#06x}={_value_text(v)}" for var, v in match.hud_vars.items())
+                return f"HUD var rewrites: {listed or 'none'}."
+            try:
+                var, value = loadout.parse_hud_value(text)
+            except ValueError as error:
+                return str(error)
+            match.hud_vars[var] = value
+            match.resnapshot_bodies()
+            match.ui_mount(match.mount_widgets)
+            return f"{var:#06x} := {_value_text(value)}, pictures re-sent."
 
     def set_gun_presenters(self, on: bool) -> int:
         """Flip the weapon-script presenter knob (the debug chat's .pres) and re-send every

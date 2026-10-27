@@ -88,6 +88,7 @@ def body_instances(
     body_guid: int,
     allow: set[str] | None = None,
     entries: dict[tuple[int, int], statescript.HasData] | None = None,
+    hud_vars: dict[int, statescript.Value] | None = None,
 ) -> tuple[list, dict]:
     """The body's initial graphs as (instances, entity vars) for an owner full frame.
 
@@ -96,6 +97,11 @@ def body_instances(
     run its Entry nodes, so the settled picture a running Entry would reach is sent directly
     (statescript.py). A SubScript launcher is turned on only when the graph it starts is one of
     this body's instances, so the child id it carries is always valid.
+
+    `hud_vars` is the debug chat's rewrite dict (.hudvar): the value of a variable whose id the
+    hero HUD graph syncs is written over the shipped presence value, the weapon scripts' synced
+    variables take theirs too, and the rest rides the entity block instead (the presenter's
+    binding list).
 
     Two entity variables deserve naming here and nowhere else. The first is the hero asset every
     StateHero in the graphs reads (0x03ac): unset, no StateHero ever starts; a null guid there and
@@ -174,7 +180,7 @@ def body_instances(
                 active=active,
             )
         )
-    instances += gun_instances(body_guid, allow, entries)
+    instances += gun_instances(body_guid, allow, entries, hud_vars)
     if hero is not None:
         # The hero HUD content graph is resident only once something launches it, and its one
         # launcher sits in the dispatcher graph 0x004B the body already owns: the client loads
@@ -198,6 +204,10 @@ def body_instances(
                 bit = hud.presence_bit(var)
                 if bit is not None:
                     presence[bit] = value
+            for var, value in (hud_vars or {}).items():
+                bit = hud.presence_bit(var)
+                if bit is not None:
+                    presence[bit] = value  # .hudvar: the live rewrite wins
             instances.append(
                 statescript.Instance(
                     hud_index,
@@ -214,6 +224,9 @@ def body_instances(
             entity_vars.setdefault(0x076C, statescript.Float(0.0))
             for var in HERO_HUD_ENTITY_VARS:
                 entity_vars.setdefault(var, statescript.Bool(True))
+            for var, value in (hud_vars or {}).items():
+                if hud.presence_bit(var) is None:
+                    entity_vars[var] = value  # the entity-scope bindings and the unbound ids
     return instances, entity_vars
 
 
@@ -276,9 +289,90 @@ HERO_HUD_PRESENCE = {
 }
 HERO_HUD_ENTITY_VARS = (0x2E27, 0x0757, 0x0406, 0x45C2, 0x2243, 0x2AD4, 0x73ED, 0x001F)
 
+HUD_VAR_USAGE = (
+    "Usage: .hudvar <var> <value> - the id in hex, the value in its kind "
+    "(e.g. .hudvar 0x1B84 100, .hudvar 0x2EAB off, .hudvar 0x06C4 99.5), "
+    "an explicit bool:/int:/float: prefix when the id is unlisted, or clear."
+)
+
+
+def hud_var_default(var: int) -> statescript.Value | None:
+    """The shipped kind of a hero-HUD variable, the value .hudvar's rewrite keeps: a variable the
+    shipped tables name carries its kind, anything else must say its kind explicitly."""
+    if var in HERO_HUD_PRESENCE:
+        return HERO_HUD_PRESENCE[var]
+    if var == HERO_HUD_HERO_VAR:
+        return statescript.Asset(0)
+    if var in (0x076C, HEALTH_VAR, HEALTH_MAX_VAR):
+        return statescript.Float(0.0)
+    if var == ALIVE_VAR:
+        return statescript.Bool(True)
+    from ow174.game import heroselect  # here: heroselect pulls the screens in, keep it lazy
+
+    if var in heroselect.PANEL_VARS or var in HERO_HUD_ENTITY_VARS:
+        return statescript.Bool(True)
+    return None
+
+
+def parse_hud_value(spec: str) -> tuple[int, statescript.Value]:
+    """'.hudvar <var> <value>' as (var, value): the id in hex (0x-optional), the value in the
+    variable's shipped kind - on/off for the flags, a whole number for the ints, with a decimal
+    point for the floats - or any kind explicitly with a bool:/int:/float: prefix. Unknown ids
+    need the explicit kind: the shipped kind is what keeps a frame the length the client knows."""
+    var_token, _, value_token = spec.strip().partition(" ")
+    value_token = value_token.strip()
+    try:
+        var = int(var_token, 16)
+    except ValueError:
+        raise ValueError(f"Bad var id '{var_token}'. " + HUD_VAR_USAGE) from None
+    if not value_token:
+        raise ValueError("No value. " + HUD_VAR_USAGE)
+    default = hud_var_default(var)
+    kind = None
+    for prefix in ("bool:", "int:", "float:"):
+        if value_token.lower().startswith(prefix):
+            kind, value_token = prefix[:-1], value_token[len(prefix):]
+            break
+    if kind is None:
+        if default is None:
+            raise ValueError(
+                f"{var:#06x} is in no shipped list; say the kind (bool:/int:/float:). " + HUD_VAR_USAGE
+            )
+        kind = {statescript.Bool: "bool", statescript.Int: "int", statescript.Float: "float",
+                statescript.Asset: "asset"}[type(default)]
+    if kind == "bool":
+        if value_token in ("on", "true", "yes"):
+            return var, statescript.Bool(True)
+        if value_token in ("off", "false", "no"):
+            return var, statescript.Bool(False)
+        try:
+            return var, statescript.Bool(int(value_token, 0) != 0)
+        except ValueError:
+            raise ValueError(f"{var:#06x} is a flag: on|off. " + HUD_VAR_USAGE) from None
+    if kind == "asset":
+        try:
+            return var, statescript.Asset(int(value_token, 16))
+        except ValueError:
+            raise ValueError(f"{var:#06x} wants an asset guid in hex. " + HUD_VAR_USAGE) from None
+    if "." in value_token:
+        if kind == "int":
+            raise ValueError(f"{var:#06x} is an int, no decimal point. " + HUD_VAR_USAGE)
+        try:
+            return var, statescript.Float(float(value_token))
+        except ValueError:
+            raise ValueError(f"Bad float '{value_token}'. " + HUD_VAR_USAGE) from None
+    try:
+        number = int(value_token, 0)
+    except ValueError:
+        raise ValueError(f"Bad number '{value_token}'. " + HUD_VAR_USAGE) from None
+    return (var, statescript.Float(float(number))) if kind == "float" else (var, statescript.Int(number))
+
 
 def gun_instances(
-    body_guid: int, allow: set[str] | None, entries: dict[tuple[int, int], statescript.HasData]
+    body_guid: int,
+    allow: set[str] | None,
+    entries: dict[tuple[int, int], statescript.HasData],
+    hud_vars: dict[int, statescript.Value] | None = None,
 ) -> list:
     """The manager (0x15) and the weapon scripts' instances for a body: the scripts a gun needs.
 
@@ -327,6 +421,10 @@ def gun_instances(
         bit = g.presence_bit(AMMO_VAR)
         if bit is not None:
             presence[bit] = statescript.Int(AMMO_MAGAZINE)
+        for var, value in (hud_vars or {}).items():
+            wbit = g.presence_bit(var)
+            if wbit is not None:
+                presence[wbit] = value  # .hudvar reaches the weapon scripts' counters too
         for (want, want_slot), value in (entries or {}).items():
             if want == index and want_slot < len(g.owner_states()):
                 active[want_slot] = value
@@ -415,11 +513,12 @@ def body_frame(
     lbss: int | None = None,
     allow: set[str] | None = None,
     entries: dict[tuple[int, int], statescript.HasData] | None = None,
+    hud_vars: dict[int, statescript.Value] | None = None,
 ):
     """The owner full frame of the body's scripts, None for a body the data does not describe.
     `cmfd` must exceed the last CmFD sent to this entity, as any owner frame does. `entries`
     lights or stops two-bit states on top of the static picture, keyed (instance, state slot)."""
-    instances, entity_vars = body_instances(body_guid, allow, entries)
+    instances, entity_vars = body_instances(body_guid, allow, entries, hud_vars)
     if not instances:
         return None
     return statescript.owner_full_frame(cmfd, instances, entity_vars, lbss)
@@ -440,9 +539,10 @@ def body_full_chunk(
     cmfd: int,
     allow: set[str] | None = None,
     entries: dict[tuple[int, int], statescript.HasData] | None = None,
+    hud_vars: dict[int, statescript.Value] | None = None,
 ):
     """The second record: the activating full snapshot, wrapped at base 0 (last frame 2, so it
     stays above the create's graph-info frame and cannot queue-stall). The same blob wrapped at a
     numbered base is ignored: a full frame at base 0 is what resets and creates the instances."""
-    frame = body_frame(body_guid, cmfd, allow=allow, entries=entries)
+    frame = body_frame(body_guid, cmfd, allow=allow, entries=entries, hud_vars=hud_vars)
     return None if frame is None else statescript.chunk(frame, 0, 3)
