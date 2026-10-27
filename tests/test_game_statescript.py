@@ -78,6 +78,17 @@ class StatescriptTests(unittest.TestCase):
         hidden = heroselect.controller_frame(practice, 123456, True, skins=True, hide_assemble=True)
         self.assertEqual(hidden.count - shown.count, 33)
 
+    def test_hud_var_overrides_reach_the_controller_frame(self):
+        # .hudvar on the controller's pool: a synced var joins the controller instance's presence
+        # and an id outside its list rides the entity block; the frame grows past the shipped one.
+        practice = heroselect.PRACTICE
+        base = heroselect.controller_frame(practice, 123456, False, hud=True)
+        over = heroselect.controller_frame(
+            practice, 123456, False, hud=True,
+            overrides={0x2291: Bool(True), 0x9999: Bool(True)},
+        )
+        self.assertGreater(over.count, base.count)
+
     def test_an_owner_ack_is_56_bits(self):
         self.assertEqual(owner_ack(123500).count, 56)
 

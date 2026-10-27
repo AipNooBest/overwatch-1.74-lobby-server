@@ -362,23 +362,26 @@ class GameServer:
         return False
 
     def hud_var(self, account_lo: int, spec: str) -> str:
-        """The debug chat's .hudvar: rewrite one hero-HUD variable on the caller's match and
-        re-send the pictures that carry it (the bodies' snapshots and the UI mount). A bare
-        command lists the current rewrites, clear drops them."""
+        """The debug chat's .hudvar: rewrite one hero-HUD variable on the caller's match. The
+        pictures that carry those variables apply the rewrite when their instances initialize, so
+        the command re-creates them: the bodies' snapshots (the hero HUD's presence, the weapon
+        scripts' counters, the entity block), the HUD mount without and with its widget instances,
+        and a controller frame with the rewrite inside. A bare command lists the current
+        rewrites, clear drops them."""
         with self.lock:
-            match = next(
-                (m for m in self.matches for p in m.players
+            pair = next(
+                ((m, p) for m in self.matches for p in m.players
                  if p.account_lo == account_lo and p.client is not None),
                 None,
             )
-            if match is None:
+            if pair is None:
                 return "You are not in a match."
+            match, player = pair
             text = spec.strip()
             if text.lower() == "clear":
                 match.hud_vars.clear()
-                match.resnapshot_bodies()
-                match.ui_mount(match.mount_widgets)
-                return "HUD var rewrites cleared, pictures re-sent."
+                self._hud_reapply(match, player)
+                return "HUD var rewrites cleared, pictures re-created."
             if not text:
                 listed = ", ".join(f"{var:#06x}={_value_text(v)}" for var, v in match.hud_vars.items())
                 return f"HUD var rewrites: {listed or 'none'}."
@@ -387,9 +390,19 @@ class GameServer:
             except ValueError as error:
                 return str(error)
             match.hud_vars[var] = value
-            match.resnapshot_bodies()
-            match.ui_mount(match.mount_widgets)
-            return f"{var:#06x} := {_value_text(value)}, pictures re-sent."
+            self._hud_reapply(match, player)
+            return f"{var:#06x} := {_value_text(value)}, pictures re-created."
+
+    @staticmethod
+    def _hud_reapply(match: Match, player: Player) -> None:
+        """The re-create half of .hudvar: presence values land only when the instances initialize,
+        so every picture carrying them goes through its destroy-create (the bodies through a new
+        base-0 snapshot, the widgets through the bare frame and its full return, the controller
+        through a fresh full frame)."""
+        match.resnapshot_bodies()
+        match.ui_mount(False)
+        match.ui_mount(True)
+        match.send_controller(player)
 
     def set_gun_presenters(self, on: bool) -> int:
         """Flip the weapon-script presenter knob (the debug chat's .pres) and re-send every

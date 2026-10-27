@@ -98,13 +98,16 @@ def controller_frame(
     skins: bool = False,
     hide_assemble: bool = False,
     hud: bool = False,
+    overrides: dict | None = None,
 ):
     """The owner full frame for the player's entity: the controller (1) with hero select 288A (2) ->
     288B (3) under it, 13C1's HUD 20E4 (4), and 288A's team list entry 288D (the next index).
     `skins` turns on v25377, which shows the skin selector; `hide_assemble` hides the assemble title
     and timer that come with it. `hud` mounts the HUD subgraph on (the gate state and its begin
     variables) rather than just creating the instance: pass it when the hero's body scripts ride the
-    body, the configuration the HUD widgets read their data from."""
+    body, the configuration the HUD widgets read their data from. `overrides` is the debug chat's
+    .hudvar rewrite: a synced variable of the controller graph joins the controller instance's
+    presence, anything else rides the entity block."""
     active = {controller.hero_select_bit: None, controller.select_bit: subscript(2)}
     host = Instance(2, HERO_SELECT_HOST, parent=(1, controller.select_state), active={0: subscript(3)})
     screen = Instance(3, HERO_SELECT, parent=(2, 0))
@@ -127,6 +130,16 @@ def controller_frame(
         screen.presence[ASSEMBLING] = Bool(True)
     if hide_assemble:
         screen.extra[HIDE_ASSEMBLE] = Bool(True)
+    if overrides:
+        from ow174.game.script import graph as graph_data  # here: keep the parser import lazy
+
+        synced = graph_data.graph(controller.graph.index)
+        for var, value in overrides.items():
+            bit = synced.presence_bit(var) if synced is not None else None
+            if bit is not None:
+                instances[0].presence[bit] = value  # the controller instance's own pool
+            else:
+                variables[var] = value  # entity scope: the begin-condition block
     return owner_full_frame(cmfd, instances, variables)
 
 

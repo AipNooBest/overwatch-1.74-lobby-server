@@ -622,7 +622,8 @@ class Match:
         practice = self.controller is heroselect.PRACTICE
         skins = player.select_open and (practice or self.assembling())
         frame = heroselect.controller_frame(
-            self.controller, cmfd, player.select_open, skins, practice, self.hero_scripts
+            self.controller, cmfd, player.select_open, skins, practice, self.hero_scripts,
+            overrides=self.hud_vars,
         )
         player.client.queue_entities([player.script.full_frame(frame)])
         state = "open" if player.select_open else "closed"
