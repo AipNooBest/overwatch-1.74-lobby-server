@@ -141,14 +141,16 @@ class LoadoutTests(unittest.TestCase):
         self.assertTrue(carriers)
 
     def test_the_ammo_counter_outranks_the_bare_presenters(self):
-        # The rifle graph presents three slots but only one reads the ammo var; the bare two
-        # would draw a second weapon card, so the shipped picture activates the counter alone.
+        # The rifle graph presents three slots: the counter reads the ammo var, the ability
+        # card reads only the charge var (.003D, the helix rockets), and the third presents a
+        # second rifle image with no number source - the shipped picture lights the first two
+        # and leaves the image dark.
         hero = next(h for h in heroes().values() if h.name == "Soldier: 76")
         instances, _ = loadout.body_instances(hero.body, allow=None)
         gun = next(i for i in instances if i.graph.index == 0x254)
         self.assertIn(66, gun.active)
+        self.assertIn(65, gun.active)
         self.assertNotIn(64, gun.active)
-        self.assertNotIn(65, gun.active)
         # a melee script has no counter at all: its bare card is the whole readout and stays
         instances, _ = loadout.body_instances(
             next(h for h in heroes().values() if h.name == "Reinhardt").body, allow=None

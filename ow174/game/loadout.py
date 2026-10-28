@@ -239,8 +239,10 @@ def body_instances(
 # knob lives here and the encoder reads it on every snapshot. A script that has a presenter reading
 # the ammo var gets only those: every gun graph also carries a presenter with no number to present
 # (the rifle graph's second weapon card with the infinity sign), and lighting it shows a weapon the
-# gun does not have. Scripts whose presenters all read no ammo var - the melee and the staff -
-# keep them: there the bare card is the whole readout.
+# gun does not have. One bare kind is real: the presenter that reads only the charge var (.003D)
+# presents the gun's alternate-fire card - the soldier's helix rockets, Lucio's song selection -
+# and the retail HUD keeps it beside the counter. Scripts whose presenters all read no ammo var - the
+# melee and the staff - keep them: there the bare card is the whole readout.
 GUN_PRESENTERS = True
 # The manager graph's states a live run proved enough to let the weapon cosmetics build (the
 # census manager run: manager states 39 and 43 with a cosmetic state turn the gloves into the
@@ -253,6 +255,9 @@ MANAGER_STATES = (29, 33)
 # script presents its weapon (HUD counter, view model); .0035 and .00C6 are then its numbers.
 AMMO_VAR = 0x0035
 AMMO_MAGAZINE = 30
+# The charge var (.003D): how many rounds the gun's alternate-fire card shows - the helix rockets and
+# the like. A presenter whose bindings are only this var is that card, not a spare weapon image.
+CHARGE_VAR = 0x003D
 WEAPON_GATE_VAR = 0x001C
 WEAPON_GATE_VALUE = 50
 AMMO_CAP_VAR = 0x00C6
@@ -322,7 +327,7 @@ def hud_var_default(var: int) -> statescript.Value | None:
         return statescript.Float(0.0)
     if var == ALIVE_VAR:
         return statescript.Bool(True)
-    if var in (WEAPON_GATE_VAR, AMMO_VAR, 0x00C6):
+    if var in (WEAPON_GATE_VAR, AMMO_VAR, CHARGE_VAR, 0x00C6):
         return statescript.Int(1)  # the weapon scripts' gate and two counter numbers
     from ow174.game import heroselect  # here: heroselect pulls the screens in, keep it lazy
 
@@ -385,20 +390,21 @@ def parse_hud_value(spec: str) -> tuple[int, statescript.Value]:
     return (var, statescript.Float(float(number))) if kind == "float" else (var, statescript.Int(number))
 
 
-def _presenter_slots(g) -> tuple[set, set]:
-    """(every UXPresenter state slot, the slots of presenters whose bindings read the ammo var):
-    the script's own counters. A dynamic identifier indexes the graph's synced-var list, but the
-    widget configs use larger ids for widget handles, so only in-range ones count as var reads."""
+def _presenter_slots(g) -> tuple[set, set, set]:
+    """(every UXPresenter state slot, the slots of presenters whose bindings read the ammo var,
+    the slots reading the charge var): the script's own counters and its alternate-fire card. A dynamic
+    identifier indexes the graph's synced-var list, but the widget configs use larger ids for
+    widget handles, so only in-range ones count as var reads."""
     sv = list(g.sync_vars)
 
-    def reads_ammo(fields):
+    def reads(fields, want):
         stack = [fields]
         while stack:
             node = stack.pop()
             if isinstance(node, dict):
                 if node.get("$") == "STUConfigVarDynamic":
                     ident = node.get("m_identifier")
-                    if isinstance(ident, int) and ident < len(sv) and sv[ident].var == AMMO_VAR:
+                    if isinstance(ident, int) and ident < len(sv) and sv[ident].var == want:
                         return True
                 stack.extend(node.values())
             elif isinstance(node, list):
@@ -407,7 +413,9 @@ def _presenter_slots(g) -> tuple[set, set]:
 
     every = {slot for slot, node in enumerate(g.owner_states())
              if node.cls == "STUStatescriptStateUXPresenter"}
-    return every, {slot for slot in every if reads_ammo(g.owner_states()[slot].fields)}
+    states = g.owner_states()
+    return (every, {slot for slot in every if reads(states[slot].fields, AMMO_VAR)},
+            {slot for slot in every if reads(states[slot].fields, CHARGE_VAR)})
 
 
 def gun_instances(
@@ -470,11 +478,11 @@ def gun_instances(
             # Body graphs light their presenters through SHIP_STATES: those are the ability bar.
         }
         if GUN_PRESENTERS:
-            every, with_ammo = _presenter_slots(g)
+            every, with_ammo, with_charge = _presenter_slots(g)
             if with_ammo:
-                # The gun shows exactly the cards it has counters for; the bare presenters next
-                # to a counter would show a weapon the gun does not have.
-                for slot in every - with_ammo:
+                # The gun shows its counter and its ability card; the image-only bare presenters
+                # next to a counter would show a weapon the gun does not have.
+                for slot in every - with_ammo - with_charge:
                     active.pop(slot, None)
         presence = {}
         bit = g.presence_bit(AMMO_VAR)

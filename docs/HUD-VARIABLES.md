@@ -27,7 +27,7 @@ Each gun script syncs the ammo trio (var ids are stable across heroes; the bit p
 | `.0035` | current ammo (the big number) | `int:30` |
 | `.00C6` | magazine size (the small number after the slash) | `int:30` |
 
-A gun script usually carries **two UXPresenter states**: one whose binding list includes `.0035` (the counter card) and one that binds only `.001F`/`.281C`-class vars, which is a bare gun image, the alt-fire/second-slot card. The bare one has no finite number source, so it renders its count as the infinity glyph. Lighting every presenter therefore draws a second weapon the hero does not own (the soldier's "two guns"). The shipped policy activates the bare presenters only for scripts that have no counter presenter at all, so for a melee hammer or Mercy's staff the bare card *is* the readout. `.281C`, a synced int on every gun script (Soldier's presence bit 3), makes nothing visible at 0, 1 or 3; it does not gate the second card.
+A gun script usually carries two UXPresenter states: one whose binding list includes `.0035` (the counter card) and one that binds only `.001F`/`.281C`-class vars, a bare gun image. The bare one has no finite number source, so its count comes out as the infinity glyph, and lighting every presenter draws a weapon the hero does not own; that was the soldier's "two guns". Some scripts carry a third kind, a presenter bound only to the charge var `.003D`. It presents the gun's alternate-fire card, the right-click entry on the bar, in the slot beside the weapon card. The shipped policy lights the counter and the charge presenter and leaves the image-only card dark. For scripts with no counter at all (the melee hammer, Mercy's staff) the bare card is the readout and stays. `.281C`, a synced int on every gun script (Soldier's presence bit 3), changes nothing visible at 0, 1 or 3 and does not gate the alternate-fire card.
 
 Full census (parsed from the `.01C` graph records; re-derive with the snippet below):
 
@@ -43,7 +43,7 @@ Full census (parsed from the `.01C` graph records; re-derive with the snippet be
 | Echo | `0x19e5` | 11 | 12 |
 | Genji | `0x304` | 75 | 74 |
 | Junkrat | `0x22b` | 27 | 26 |
-| Lúcio | `0x776` | 47 | 46, 48 |
+| Lúcio | `0x776` | 47 | 46, 48 (charge card) |
 | Mercy (staff) | `0x6b` | - | 45 |
 | Mercy (blaster) | `0x6d` | 30 | 29 |
 | Orisa | `0xbd4` | 45 | 44 |
@@ -52,7 +52,7 @@ Full census (parsed from the `.01C` graph records; re-derive with the snippet be
 | Reinhardt | `0x48` | - | 40 |
 | Roadhog | `0x1c6` | 41 | 40 |
 | Sigma | `0x187f` | - | 19 |
-| Soldier: 76 | `0x254` | 66 | 64, 65 |
+| Soldier: 76 | `0x254` | 66 | 64, 65 (charge card) |
 | Symmetra | `0x157c` | 63 | 61, 62 |
 | Torbjörn (gun) | `0x1683` | 32 | 31 |
 | Torbjörn (turret) | `0x168c` | - | 27 |
@@ -94,12 +94,12 @@ Widget-config entries reference the same `STUConfigVarDynamic` class with large 
 
 The ability icons are UXPresenter states of the hero's *ability* scripts, not of the gun
 script: Soldier: 76 has them at `0x255` slot 28, `0x257` slot 16 and `0x259` slot 32; Zenyatta
-across four graphs. They render when the body allow-list (SHIP_STATES) names `UXPresenter`,
-which is shipped since 28.10.2026 - before that the bar was empty for every hero. The run
-that turned the bar on also showed why the allow-list cannot simply be "everything": with
-every one-bit class active the client dies at spawn (a state's begin action reads a preload
-the server does not send). The ult still rides only the ring's percent readout; the third
-soldier card is unaccounted for.
+across four graphs. They render once the body allow-list (SHIP_STATES) names `UXPresenter`; without that entry
+the bar stays empty for every hero. The same run showed
+the allow-list cannot simply be "everything": with every one-bit class active the client dies
+at spawn, a state's begin action reading a preload the server does not send. The ult still
+rides only the ring's percent readout; the icon slot under the ring (the soldier's Tactical
+Visor, `0x259`'s presenter) is still unexplained.
 
 ## 3. The hero-HUD graph `0x01CF` pool (22 presence bits)
 

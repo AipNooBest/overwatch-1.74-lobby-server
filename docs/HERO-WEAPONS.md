@@ -97,7 +97,7 @@ and two small inactive weapon-slot icons in the bottom-right corner. The ammo di
 health number and bar, the ability slot row and the portrait do NOT paint from the current
 mounts. An earlier session read an ammo line "30/30", an armor/shield "0/0" and an ability row
 off its screenshots - that was a misread: the "30/30" glyphs are a duplicated render of the
-weapon model, re-verified 2026-10-27 with fresh captures and a camera-move test
+weapon model, verified with fresh captures and a camera-move test
 (`evidence/hud-symmetra-verified-20261027.png`). Soldier: 76 shows the same ring; his ult
 charge lives in his ability script and stays a known gap.
 
@@ -148,7 +148,7 @@ the number), 0x4b (the hero HUD dispatcher: launcher state 3 starts the HUD grap
 the graph's own expiry-tick state stays dark) and 0x43 (`Anim` slots 1 and 11, `Ability` slot 5 and
 the hero's contact set); each hero adds its own ability graphs, whose slots the extract lists.
 
-Animations and presenters are in the tables but NOT activated by the server today: a live run
+Animations and presenters are in the tables but the server does not activate them: a live run
 showed an active one plays its presentation the moment the body activates - the soldier spawns
 into his visor animation, and the symmetra's teleporter placement screen takes her whole view.
 They must start as transitions (the state on, then the event), as the volley does. The ult
@@ -156,11 +156,13 @@ presentation is the same mechanism: the hero-specific ability graph, its `Anim`/
 slots listed here.
 
 `UXPresenter` states do ship on the weapon scripts (`GUN_PRESENTERS` in `loadout.py`), but only
-the ones with a number to show: a script whose presenters read the ammo var activates those
-alone - the bare ones next to a counter draw a second weapon card that is not a weapon (the
-rifle graph's infinity sign; worknotes §6h). A script whose presenters read no ammo var at all -
-the melee hammer, the staff - ships its bare card as is: there it is the whole readout. `.hudslot`
-overrides the policy per state, live.
+the ones with a number to show: a script whose presenters read the ammo var activates those plus
+any presenter reading only the charge var `.003D`, the gun's alternate-fire card (the soldier's
+helix rockets, Lúcio's song selection); the retail HUD keeps that card beside the counter. The
+remaining bare presenters next to a counter draw a spare gun image, not a weapon (the rifle
+graph's infinity sign; worknotes §6h). A script whose presenters read
+no ammo var at all, the melee hammer or the staff, ships its bare card as is: there it is the
+whole readout. `.hudslot` overrides the policy per state while the server runs.
 
 | hero | weapon script | cosmetic (def) | volley | anim | presenter | ability |
 |---|---|---|---|---|---|---|
