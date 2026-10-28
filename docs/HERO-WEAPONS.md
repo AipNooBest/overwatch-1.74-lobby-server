@@ -158,7 +158,7 @@ slots listed here.
 `UXPresenter` states do ship on the weapon scripts (`GUN_PRESENTERS` in `loadout.py`), but only
 the ones with a number to show: a script whose presenters read the ammo var activates those plus
 any presenter reading only the charge var `.003D`, the gun's alternate-fire card (the soldier's
-helix rockets, Lúcio's song selection); the retail HUD keeps that card beside the counter. The
+Helix Rockets, Lúcio's Soundwave); the retail HUD keeps that card beside the counter. The
 remaining bare presenters next to a counter draw a spare gun image, not a weapon (the rifle
 graph's infinity sign; worknotes §6h). A script whose presenters read
 no ammo var at all, the melee hammer or the staff, ships its bare card as is: there it is the

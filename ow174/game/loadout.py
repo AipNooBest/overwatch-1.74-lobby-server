@@ -240,7 +240,7 @@ def body_instances(
 # the ammo var gets only those: every gun graph also carries a presenter with no number to present
 # (the rifle graph's second weapon card with the infinity sign), and lighting it shows a weapon the
 # gun does not have. One bare kind is real: the presenter that reads only the charge var (.003D)
-# presents the gun's alternate-fire card - the soldier's helix rockets, Lucio's song selection -
+# presents the gun's alternate-fire card - the soldier's Helix Rockets, Lucio's Soundwave -
 # and the retail HUD keeps it beside the counter. Scripts whose presenters all read no ammo var - the
 # melee and the staff - keep them: there the bare card is the whole readout.
 GUN_PRESENTERS = True
