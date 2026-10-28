@@ -183,50 +183,68 @@ def body_instances(
         )
     instances += gun_instances(body_guid, allow, entries, hud_vars, slots)
     if hero is not None:
-        # The hero HUD content graph is resident only once something launches it, and its one
-        # launcher sits in the dispatcher graph 0x004B the body already owns: the client loads
-        # a graph on demand under a launcher whose override names it (this is how 0x120B
-        # arrives under the UI host). Light that launcher with the HUD as a child instance and
-        # the readouts draw for the owning player.
+        # The hero HUD content graphs are resident only once something launches them, and their
+        # launchers sit in the dispatcher graph 0x004B the body already owns: the client loads a
+        # graph on demand under a launcher whose override names it (this is how 0x120B arrives
+        # under the UI host). Light those launchers with the HUD layers as child instances and
+        # the readouts draw for the owning player. The health bar and the portrait sit on a
+        # sibling layer of the same dispatcher: 0x01CB rides beside 0x01CF, and its presenter
+        # needs the same run - the gate class and the UXPresenter state, activated by class so a
+        # graph that has neither in it simply ships nothing extra.
         dispatcher = next(
             (i for i in instances if i.graph.index == HERO_HUD_DISPATCHER), None
         )
-        hud = graph.graph(HERO_HUD_GRAPH)
-        slot = None
-        if dispatcher is not None and hud is not None:
-            for want, node in enumerate(graph.graph(HERO_HUD_DISPATCHER).owner_states()):
-                if node.cls == "STU_37D754C8" and _subscript_target(node) == HERO_HUD_GRAPH:
-                    slot = want
-                    break
-        if slot is not None:
-            hud_index = max(i.index for i in instances) + 1
-            presence = {}
-            for var, value in HERO_HUD_PRESENCE.items():
-                bit = hud.presence_bit(var)
-                if bit is not None:
-                    presence[bit] = value
-            for var, value in (hud_vars or {}).items():
-                bit = hud.presence_bit(var)
-                if bit is not None:
-                    presence[bit] = value  # .hudvar: the live rewrite wins
-            instances.append(
-                statescript.Instance(
-                    hud_index,
-                    statescript.Graph(
-                        HERO_HUD_GRAPH, len(hud.owner_states()), len(hud.presence_vars())
-                    ),
-                    presence=presence,
-                    active={HERO_HUD_GATE: None, HERO_HUD_PRESENTER: None},
-                    parent=(dispatcher.index, slot),
+        dispatch = graph.graph(HERO_HUD_DISPATCHER) if dispatcher is not None else None
+        if dispatch is not None:
+            launchers: dict[int, int] = {}
+            for want, node in enumerate(dispatch.owner_states()):
+                if node.cls == "STU_37D754C8":
+                    launchers.setdefault(_subscript_target(node), want)
+            for hud_graph in HUD_FAMILY:
+                hud = graph.graph(hud_graph)
+                slot = launchers.get(hud_graph)
+                if hud is None or slot is None or slot in dispatcher.active:
+                    continue
+                hud_index = max(i.index for i in instances) + 1
+                presence = {}
+                shipped = HERO_HUD_PRESENCE if hud_graph == HERO_HUD_GRAPH else HUD_LAYER_PRESENCE
+                for var, value in shipped.items():
+                    bit = hud.presence_bit(var)
+                    if bit is not None:
+                        presence[bit] = value
+                    elif var < 1 << 32:
+                        # an entity-scope id of the layer's pool (the gate and the respawn chip
+                        # watch those): a presence bit would be read as a different variable,
+                        # the entity block is where the layer finds them
+                        entity_vars.setdefault(var, value)
+                for var, value in (hud_vars or {}).items():
+                    bit = hud.presence_bit(var)
+                    if bit is not None:
+                        presence[bit] = value  # .hudvar: the live rewrite wins
+                active = {
+                    want: None
+                    for want, node in enumerate(hud.owner_states())
+                    if node.cls in HUD_RUN_STATES
+                }
+                instances.append(
+                    statescript.Instance(
+                        hud_index,
+                        statescript.Graph(
+                            hud_graph, len(hud.owner_states()), len(hud.presence_vars())
+                        ),
+                        presence=presence,
+                        active=active,
+                        parent=(dispatcher.index, slot),
+                    )
                 )
-            )
-            dispatcher.active[slot] = statescript.subscript(hud_index)
+                dispatcher.active[slot] = statescript.subscript(hud_index)
             entity_vars.setdefault(HERO_HUD_HERO_VAR, statescript.Asset(hero.guid))
             entity_vars.setdefault(0x076C, statescript.Float(0.0))
             for var in HERO_HUD_ENTITY_VARS:
                 entity_vars.setdefault(var, statescript.Bool(True))
+            hud = graph.graph(HERO_HUD_GRAPH)
             for var, value in (hud_vars or {}).items():
-                if hud.presence_bit(var) is None and var < 1 << 32:
+                if hud is not None and hud.presence_bit(var) is None and var < 1 << 32:
                     # the entity-scope bindings and the unbound ids; 48-bit .01B identifiers of
                     # the mount graphs have no wire form here (w_var is 32 bits) - the mount pass
                     # lights them as presence
@@ -278,6 +296,14 @@ HERO_HUD_DISPATCHER = 0x004B
 HERO_HUD_GRAPH = 0x01CF
 HERO_HUD_GATE = 40
 HERO_HUD_PRESENTER = 28
+# The HUD layers the dispatcher launches and the server ships active: 0x01CF carries the ult
+# ring readout, its sibling 0x01CB the hero panel layer (96 states, one UXPresenter and one
+# gate of the same class). A launcher whose graph is not in this tuple stays unlit.
+HUD_FAMILY = (0x01CF, 0x01CB)
+# The states inside a HUD graph that must run: the presenter that hands the widget set to the
+# UI, and the gate class the 0x01CF instance ships active (the slot numbers differ per graph,
+# so the pair is picked by class).
+HUD_RUN_STATES = ("STUStatescriptStateUXPresenter", "STU_9D7BF987")
 HERO_HUD_HERO_VAR = 0x0735
 HERO_HUD_PRESENCE = {
     0x0A14: statescript.Int(0),
@@ -294,7 +320,7 @@ HERO_HUD_PRESENCE = {
     0x070F: statescript.Bool(True),
     0x171B: statescript.Bool(True),
     0x071D: statescript.Bool(True),
-    0x0028: statescript.Int(0),
+    0x0028: statescript.Int(1),  # both HUD gates watch this var; zero keeps the gate closed
     0x2450: statescript.Bool(True),
     0x2451: statescript.Bool(True),
     0x2454: statescript.Bool(True),
@@ -304,6 +330,28 @@ HERO_HUD_PRESENCE = {
     0x1B84: statescript.Int(50),
     0x0188: statescript.Bool(True),
     0x01FE: statescript.Bool(True),
+}
+# The 0x01CB layer's own pool. The layer's gate (owner state 95) watches thirteen of these
+# identifiers and stays closed while any of them reads as missing; a live probe filled them
+# and the layer lit up (respawn chip, the red health line at the left edge). The health
+# numbers ride .065D (current) and .063D (max); .0837 is the float the ChaseVar state lerps
+# the ult ring towards.
+HUD_LAYER_PRESENCE = {
+    0x0028: statescript.Int(200),
+    0x0180: statescript.Int(200),
+    0x01DE: statescript.Int(200),
+    0x0218: statescript.Int(200),
+    0x063D: statescript.Int(200),
+    0x065D: statescript.Int(200),
+    0x0837: statescript.Float(0.0),
+    0x0986: statescript.Int(200),
+    0x1792: statescript.Int(200),
+    0x1794: statescript.Int(200),
+    0x22ED: statescript.Int(200),
+    0x2CDD: statescript.Int(200),
+    0x500B: statescript.Int(200),
+    0x511B: statescript.Int(200),
+    0x54CD: statescript.Int(200),
 }
 HERO_HUD_ENTITY_VARS = (0x2E27, 0x0757, 0x0406, 0x45C2, 0x2243, 0x2AD4, 0x73ED, 0x001F)
 

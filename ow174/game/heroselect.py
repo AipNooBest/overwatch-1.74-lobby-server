@@ -364,7 +364,9 @@ def mode_chunk(cmfd: int, seconds: float):
             Instance(4, cb6, parent=(1, 21), active={0: None}),
             Instance(5, MODE_TIMER, parent=(1, 14)),
         ],
-        {MODE_COUNTDOWN: Float(seconds)},
+        # the widget-tree gate (0x0CB6 state 0) watches these two entity-scope identifiers;
+        # with values in the block the gate opens and the hero HUD widgets build
+        {MODE_COUNTDOWN: Float(seconds), 0x377E: Bool(True), 0x387F: Bool(True)},
     )
     return chunk(frame, 0, 3)
 

@@ -497,6 +497,18 @@ class GameServer:
                     count += 1
         return count
 
+    def close_hero_select(self, account_lo: int) -> bool:
+        """Close the hero select screen for one player: their controller again with the select
+        bits off (the debug chat's .pick, for the screen a re-snapshot re-opens in practice)."""
+        with self.lock:
+            for match in self.matches:
+                for player in match.players:
+                    if player.account_lo == account_lo:
+                        player.select_open = False
+                        match.send_controller(player)
+                        return True
+        return False
+
     def in_match(self, account_lo: int) -> bool:
         with self.lock:
             return any(player.account_lo == account_lo for match in self.matches for player in match.players)

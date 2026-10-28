@@ -1,5 +1,6 @@
 """Chat channels and whispers, and the commands a player types in any chat while in a match:
-.hero <name> plays another hero, .leave goes back to the menu, and the debug set - .hud, .pres,
+.hero <name> plays another hero, .leave goes back to the menu, .pick closes the hero select
+screen, and the debug set - .hud, .pres,
 .banner - turns the live server's knobs without a restart (see docs/HERO-WEAPONS.md)."""
 
 from ow174.accounts.registry import Account
@@ -81,6 +82,12 @@ def _match_command(session: Session, channel: dict, text: str) -> bool:
     elif command == "leave":
         reply = (
             "Back to the menu." if game is not None and game.send_home(session.account.account_lo)
+            else "You are not in a match."
+        )
+    elif command == "pick":
+        reply = (
+            "Hero select closed."
+            if game is not None and game.close_hero_select(session.account.account_lo)
             else "You are not in a match."
         )
     elif command == "hud":
