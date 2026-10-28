@@ -555,8 +555,8 @@ class Match:
         log.info("[game] %s: game mode snapshot sent, cmfd %d", self.label(), cmfd)
 
     def ui_hud_message(self) -> None:
-        """Ring the layer machine's .0C47 listener on the mounted UI entity (heroselect and
-        worknotes/hud-msg-indices-2026-10-26.md): the remote-sync re-send of the mount with the
+        """Ring the layer machine's .0C47 listener on the mounted UI entity (see heroselect):
+        the remote-sync re-send of the mount with the
         listener's bit on is the match-start the boot UI gets natively and the client never sends
         to an entity it did not make itself."""
         if self.ui_script is None or self.ui_player is None or self.ui_player.client is None:

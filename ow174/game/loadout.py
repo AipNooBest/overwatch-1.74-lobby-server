@@ -273,7 +273,7 @@ BODY_HEALTH = 250.0  # full health; per-hero tables come when the world starts w
 # The hero HUD (abilities bar, ammo and health readouts, ult): the content graph and its
 # dispatcher, gate and presenter (the presenter's remote-sync position 13 re-begins it on an
 # H=0 frame). The presence values are keyed by the .01C ids of the bound instance pool; the
-# entity vars are the rest of the presenter's binding list (worknotes S5.2/S6).
+# entity vars are the rest of the presenter's binding list.
 HERO_HUD_DISPATCHER = 0x004B
 HERO_HUD_GRAPH = 0x01CF
 HERO_HUD_GATE = 40

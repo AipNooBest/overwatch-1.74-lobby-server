@@ -97,8 +97,8 @@ and two small inactive weapon-slot icons in the bottom-right corner. The ammo di
 health number and bar, the ability slot row and the portrait do NOT paint from the current
 mounts. An earlier session read an ammo line "30/30", an armor/shield "0/0" and an ability row
 off its screenshots - that was a misread: the "30/30" glyphs are a duplicated render of the
-weapon model, verified with fresh captures and a camera-move test
-(`evidence/hud-symmetra-verified-20261027.png`). Soldier: 76 shows the same ring; his ult
+weapon model, verified with fresh captures and a camera-move test. Soldier: 76 shows the
+same ring; his ult
 charge lives in his ability script and stays a known gap.
 
 ## Debug chat
@@ -124,7 +124,7 @@ so an experiment costs a keypress and no restart:
   (`bool:/int:/float:/asset:`), bare `.hudvar` lists the current rewrites, `.hudvar clear` resets. Ids
   synced by the controller graph take the rewrite too (its instance pool; others join the entity
   block). The
-  variable table with the per-hero sections lives in the worknotes (`hud-vars-2026-10-27.md`).
+  variable table with the census lives in `HUD-VARIABLES.md`.
 - `.hudslot <instance> <state slot> <on|off>` - turn one weapon-script state on or off on the
   caller's match. The active-state picture is written at init like presence is, so the command
   re-creates the bodies' snapshots too (or run `.hudvar re` after it). Off drops the slot from
@@ -160,7 +160,7 @@ the ones with a number to show: a script whose presenters read the ammo var acti
 any presenter reading only the charge var `.003D`, the gun's alternate-fire card (the soldier's
 Helix Rockets, Lúcio's Soundwave); the retail HUD keeps that card beside the counter. The
 remaining bare presenters next to a counter draw a spare gun image, not a weapon (the rifle
-graph's infinity sign; worknotes §6h). A script whose presenters read
+graph's infinity sign). A script whose presenters read
 no ammo var at all, the melee hammer or the staff, ships its bare card as is: there it is the
 whole readout. `.hudslot` overrides the policy per state while the server runs.
 

@@ -341,7 +341,7 @@ def remote_frame(
     The reader casts every entry to the state base and begins it, so a GameMessageEntry listener
     position lights the way the boot-UI message does - which is how the layer machine's .0C47
     listener (m_remoteSyncNodes position 22 of 0x120B) is rung on an entity the client's own
-    message never reaches (worknotes/hud-msg-indices-2026-10-26.md). A full frame carries
+    message never reaches. A full frame carries
     everything the mount holds, states included, so the mount rides it again unchanged."""
     out = BitWriter()
     out.bit(0)  # lead

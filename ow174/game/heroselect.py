@@ -151,15 +151,15 @@ def controller_frame(
 # the client's own UI entity the machine is driven by the UI manager's mode byte; mounted on the
 # server's world-owned UI entity it runs from the wire, under the 041A root of the retail boot
 # chain (the layer gate is a five-term OR; on this host its terms are the snapshot's entity
-# variables and the world ownership itself - worknotes/ui-mount-hud-root-2026-10-26.md).
+# variables and the world ownership itself).
 UI_HOST = Graph(0x041A, 33, 7, 11)
 UI_HOST_GATE = 20  # the BooleanSwitch the chain begins on
 UI_HOST_LAUNCH = 25  # the SubScript state that starts 0x120B
 UI_MACHINE = Graph(0x120B, 44, 8, 23)
 MACHINE_ROOT = 15
-MACHINE_MESSAGE = 22  # the remote-sync position of the .0C47 listener (worknotes S2)
+MACHINE_MESSAGE = 22  # the remote-sync position of the .0C47 listener
 MACHINE_PANEL = 22  # the SubScript state whose GWO is the hero panel graph
-# The ammo widget (worknotes/hud-msg-indices S3): three UXPresenters, a branch switch and a
+# The ammo widget: three UXPresenters, a branch switch and a
 # .0C47 listener; the number is its own instance var 0x0035, presence bit 2, and the widget
 # re-reads it whenever a snapshot writes it. The hero panel (0x183C) has one networked state,
 # the gate; its nine entity variables are read by the client-side preload and stay at defaults.
@@ -234,7 +234,7 @@ def _ui_mount_frame(
     ammo counter (0x20E7, its number is the instance variable at presence bit 2) and the hero
     panel (0x183C, one networked gate, parented under the machine's launcher slot 22). The ring
     variant is the same picture as an H=0 frame with the listener positions lit: the machine's
-    match-start message and the widget's own refresh door (worknotes/hud-msg-indices S3).
+    match-start message and the widget's own refresh door.
     Without the widgets the picture is the bare layer mount: a full frame destroys the instances
     it does not list, which is the off half of the re-create the presenters need."""
     instances = [
@@ -305,7 +305,7 @@ def ui_mount_frame(cmfd: int, widgets: bool, overrides: dict | None = None):
     return chunk(_ui_mount_frame(cmfd, False, widgets=widgets, overrides=overrides), 0, 3)
 
 
-# The game mode entity's statescript, Practice Range (worknotes/mode-graph-2026-10-26.md): 0x13C0
+# The game mode entity's statescript, Practice Range: 0x13C0
 # is the round machine, and its launcher at owner state 19 brings up the in-game widget tree
 # (0x0CB6, one gate state like 0x20E4's). Every entry node of 0x13C0 is networked, so the client
 # runs none of it on its own: the phases light from the wire or the round never begins.
