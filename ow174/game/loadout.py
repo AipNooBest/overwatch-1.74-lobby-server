@@ -24,6 +24,9 @@ second-bit has-data form owner_full_frame does not write yet, and a bare active 
 shifts every later field in the frame.
 """
 
+import json
+import re
+
 from ow174.game import statescript
 from ow174.game.script import graph
 
@@ -208,6 +211,9 @@ def body_instances(
                 hud_index = max(i.index for i in instances) + 1
                 presence = {}
                 shipped = HERO_HUD_PRESENCE if hud_graph == HERO_HUD_GRAPH else HUD_LAYER_PRESENCE
+                if hud_graph == HERO_HUD_GRAPH and hud.presence_bit(HERO_HUD_HERO_VAR) is not None:
+                    # the hero asset the portrait widget reads lives in the instance pool
+                    shipped = {**shipped, HERO_HUD_HERO_VAR: statescript.Asset(hero.guid)}
                 for var, value in shipped.items():
                     bit = hud.presence_bit(var)
                     if bit is not None:
@@ -221,11 +227,28 @@ def body_instances(
                     bit = hud.presence_bit(var)
                     if bit is not None:
                         presence[bit] = value  # .hudvar: the live rewrite wins
-                active = {
-                    want: None
-                    for want, node in enumerate(hud.owner_states())
-                    if node.cls in HUD_RUN_STATES
-                }
+                active = {}
+                wanted_buttons: set[int] = set()
+                for node in hud.owner_states():
+                    if node.cls == "STUStatescriptStateUXPresenter":
+                        wanted_buttons.update(
+                            int(found)
+                            for found in re.findall(
+                                r'"m_logicalButton": (\d+)', json.dumps(node.fields)
+                            )
+                        )
+                for want, node in enumerate(hud.owner_states()):
+                    if node.cls not in HUD_RUN_STATES:
+                        continue
+                    if node.cls in statescript.HAS_DATA_STATES:
+                        # a button the graph's presenters do not bind would paint its own
+                        # widget anyway (0x01CB's button 11 is the top bar line)
+                        bound = re.search(r'"m_logicalButton": (\d+)', json.dumps(node.fields))
+                        if bound is None or int(bound.group(1)) not in wanted_buttons:
+                            continue
+                        active[want] = statescript.has_data_entry(node.cls)
+                    else:
+                        active[want] = None
                 instances.append(
                     statescript.Instance(
                         hud_index,
@@ -299,11 +322,21 @@ HERO_HUD_PRESENTER = 28
 # The HUD layers the dispatcher launches and the server ships active: 0x01CF carries the ult
 # ring readout, its sibling 0x01CB the hero panel layer (96 states, one UXPresenter and one
 # gate of the same class). A launcher whose graph is not in this tuple stays unlit.
-HUD_FAMILY = (0x01CF, 0x01CB)
+HUD_FAMILY = (0x01CF,)  # the respawn layer (0x01CB) is out of the shipped family: its group's
+# background paints as a top strip unconditionally while the presenter is active, and that is
+# the line the target HUD must not have. The chip text itself rides the respawn vars fine (it
+# paints with every layer variable zeroed); the right way to bring
+# it back is presentation-on-death from the round machine, not a permanently-active presenter.
 # The states inside a HUD graph that must run: the presenter that hands the widget set to the
-# UI, and the gate class the 0x01CF instance ships active (the slot numbers differ per graph,
-# so the pair is picked by class).
-HUD_RUN_STATES = ("STUStatescriptStateUXPresenter", "STU_9D7BF987")
+# UI, the gate class the 0x01CF instance ships active (the slot numbers differ per graph,
+# so the pair is picked by class), and the logical buttons - a UXPresenter widget bound to a
+# logical button only paints while that button is pressed, and entering the button's state is
+# what presses it (0x01CB's chip and health widgets bind buttons 20 and 29).
+HUD_RUN_STATES = (
+    "STUStatescriptStateUXPresenter",
+    "STU_9D7BF987",
+    # "STUStatescriptStateLogicalButton",  # ABLATION: line still present with these on
+)
 HERO_HUD_HERO_VAR = 0x0735
 HERO_HUD_PRESENCE = {
     0x0A14: statescript.Int(0),
@@ -325,6 +358,14 @@ HERO_HUD_PRESENCE = {
     0x2451: statescript.Bool(True),
     0x2454: statescript.Bool(True),
     0x0755: statescript.Int(int(BODY_HEALTH)),  # the maximum the health bar and its number read
+    0x01A4: statescript.Int(200),
+    0x076C: statescript.Int(0),  # the armour part of the bar, empty like a plain hero's
+    0x27A3: statescript.Bool(True),
+    0x2E4B: statescript.Bool(True),
+    0x449A: statescript.Int(0),
+    0x6154: statescript.Bool(True),
+    0x6180: statescript.Bool(True),
+    0x67C7: statescript.Bool(True),
     0x697C: statescript.Bool(True),
     0x227F: statescript.Bool(True),
     0x1B84: statescript.Int(50),
@@ -339,6 +380,7 @@ HERO_HUD_PRESENCE = {
 HUD_LAYER_PRESENCE = {
     0x0028: statescript.Int(200),
     0x0180: statescript.Int(200),
+    0x0AFF: statescript.Int(200),
     0x01DE: statescript.Int(200),
     0x0218: statescript.Int(200),
     0x063D: statescript.Int(200),
@@ -349,9 +391,15 @@ HUD_LAYER_PRESENCE = {
     0x1794: statescript.Int(200),
     0x22ED: statescript.Int(200),
     0x2CDD: statescript.Int(200),
+    0x3523: statescript.Bool(True),
     0x500B: statescript.Int(200),
     0x511B: statescript.Int(200),
     0x54CD: statescript.Int(200),
+    0x63C2: statescript.Bool(True),
+    0x63C4: statescript.Bool(True),
+    0x650B: statescript.Int(0),
+    0x65E1: statescript.Int(0),
+    0x67DB: statescript.Bool(True),
 }
 HERO_HUD_ENTITY_VARS = (0x2E27, 0x0757, 0x0406, 0x45C2, 0x2243, 0x2AD4, 0x73ED, 0x001F)
 
