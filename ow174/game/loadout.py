@@ -31,17 +31,17 @@ DROP_GRAPHS: set[int] = set()  # 16-bit graph indexes to leave out of every pict
 # The state classes the static picture activates, a set of name suffixes or None for "all the
 # one-bit classes the encoder can write". Every body_* function takes it explicitly; SHIP_STATES
 # below is what a live server sends: the health and HUD structure, the weapon cosmetics (the gun
-# model) and the logical buttons the firing conditions run through. Anim and UXPresenter states
-# are deliberately left out: an active one plays its presentation the moment the body activates,
-# and heroes carry ability-anim and placement-presenter states right into the spawn - the
-# soldier spawns mid-visor and the symmetra's placement screen swallows her view model. The
-# animations must be started as transitions (with the state already on), like the volley; the
-# presenter states return with the HUD readouts. WeaponVolley moves through `entries` instead -
+# model), the logical buttons the firing conditions run through, and the UXPresenter states -
+# in the body graphs those are the hero's ability-bar icons, live-confirmed when the list grew
+# (the soldier and the zen show their cards; the gun scripts decide theirs by policy, see
+# GUN_PRESENTERS). The blanket "all classes" run still dies on spawn: an exotic one-bit state
+# reads preloads the server does not send. The animations must be started as transitions (with
+# the state already on), like the volley. WeaponVolley moves through `entries` instead -
 # the client must see it begin and stop with its data - and the expiry-tick class (0x691BFA55)
 # stays out: a live run showed its begin action dies without the type-3 preloads. An entry
 # without a mask bit consumes nothing, so a class left out cannot shift the frame.
 SHIP_STATES = frozenset({"HealthPool", "BooleanSwitch", "Stack", "Wait",
-                         "CosmeticEntity", "LogicalButton"})
+                         "CosmeticEntity", "LogicalButton", "UXPresenter"})
 STRUCTURAL = {"STU_37D754C8", "STU_9D7BF987"}  # SubScript launchers and the HUD widget gates
 
 VAR_ID_MASK = 0xFFFFFFFFFFFF  # the .01C identifier's index, without the type bits
@@ -467,7 +467,7 @@ def gun_instances(
             or (GUN_PRESENTERS and node.cls == "STUStatescriptStateUXPresenter")
             # The weapon scripts' presenters are the HUD readouts (every hero has its counter
             # slots in the weapon graph; the per-hero tables in docs/HERO-WEAPONS.md list them).
-            # The body graphs' presenters stay dark: those are the placement screens.
+            # Body graphs light their presenters through SHIP_STATES: those are the ability bar.
         }
         if GUN_PRESENTERS:
             every, with_ammo = _presenter_slots(g)

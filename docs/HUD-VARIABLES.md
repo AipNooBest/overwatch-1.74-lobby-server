@@ -90,6 +90,17 @@ for slot, node in enumerate(g.owner_states()):
 
 Widget-config entries reference the same `STUConfigVarDynamic` class with large identifiers (>10000, widget handles); only in-range ids are variable reads, so do not treat every one as an index.
 
+## 2b. The ability bar lives in the body graphs
+
+The ability icons are UXPresenter states of the hero's *ability* scripts, not of the gun
+script: Soldier: 76 has them at `0x255` slot 28, `0x257` slot 16 and `0x259` slot 32; Zenyatta
+across four graphs. They render when the body allow-list (SHIP_STATES) names `UXPresenter`,
+which is shipped since 28.10.2026 - before that the bar was empty for every hero. The run
+that turned the bar on also showed why the allow-list cannot simply be "everything": with
+every one-bit class active the client dies at spawn (a state's begin action reads a preload
+the server does not send). The ult still rides only the ring's percent readout; the third
+soldier card is unaccounted for.
+
 ## 3. The hero-HUD graph `0x01CF` pool (22 presence bits)
 
 Single-bit rewrites at a true init, checked on Soldier and Symmetra:
