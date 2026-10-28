@@ -18,7 +18,7 @@ from ow174.services.social import ANY_SLOT, DAMAGE_SLOT
 routes = Router()
 
 # What the client sends; see content/queue.py for the role screen.
-ENTER_QUEUE = 44100  # a queue was picked (a role queue opens its role screen at once)
+ENTER_QUEUE = 44100  # a queue was picked (a group picking a role queue goes to its role screen first)
 CANCEL_QUEUE = 44102  # {key}: the player left the queue (the client drops its own entry first)
 SET_ROLES = 44103  # {role numbers}: Ready on the role screen, with the whole list
 ACCEPT = 44104  # Accept on the group banner "pick a role now?"
@@ -58,15 +58,18 @@ def queue_left(key: dict) -> dict:
 
 @routes.on(MATCHMAKE, ENTER_QUEUE)
 def enter_queue(session: Session, value: dict) -> None:
-    """The whole party joins the queue. A role queue first waits until every member pressed Ready
-    on the role screen; the member who picked the queue is on that screen already."""
+    """The whole party joins the queue. The role screen only belongs to a group start: it opens
+    when the leader of a group with members queues a role mode, and it waits until every member
+    pressed Ready. A player searching alone goes straight to the search, popup or no popup the
+    queue is a role one - retail shows a solo queue no role screen."""
     shown = json.dumps(to_jsonable(value), ensure_ascii=False)[:300]
     session.log(f"[MM] Enter queue (44100) {shown}")
     key = value["+0x78"]
     party = session.server.social.party_of(session.account)
     _send_members(session, party, 44201, queue_joined(key))
-    if not session.server.content.arcade.has_roles(_mode_guid(value)):
-        session.server.matchmaker.search(party, key, _mode_guid(value))
+    card = _mode_guid(value)
+    if len(party.members) < 2 or not session.server.content.arcade.has_roles(card):
+        session.server.matchmaker.search(party, key, card)
         return
     party.queue = key
     party.queue_state = PICKING

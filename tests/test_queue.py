@@ -76,6 +76,10 @@ class QueueTests(unittest.TestCase):
             session_of=self.sessions.get,
         )
         self.alpha = self.session("Alpha")
+        # A role queue needs a group to open its role screen, so the fixture party is two players;
+        # the solo path has its own test on a fresh account.
+        self.beta = self.session("Beta")
+        self.social.join(self.beta.account, self.social.party_of(self.alpha.account))
 
     def session(self, name):
         account = self.accounts.get(name)
@@ -149,12 +153,15 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(choice["+0x8"], [])
 
     def test_ready_starts_the_search_and_change_role_stops_it(self):
+        beta = self.beta
         enter_queue(self.alpha, ROLE_QUEUE)
         set_roles(self.alpha, {"+0x78": [2, 1, 2, 9]})
         self.assertEqual(self.choice(0)["+0x8"], [2, 1])
         self.assertTrue(self.choice(0)["+0x69"])
+        self.assertEqual(self.entry()["+0x54"], PICKING)  # Beta has not picked yet
+        set_roles(beta, {"+0x78": [3]})
         self.assertEqual(self.entry()["+0x54"], SEARCHING)
-        # The same key again: the client's search timer starts over.
+        # The same key updates the entry again: the client's search timer starts over.
         self.assertEqual(len(self.messages(self.alpha, 44201)), 2)
         change_roles(self.alpha, {})
         self.assertFalse(self.choice(0)["+0x69"])
@@ -163,8 +170,7 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.entry()["+0x54"], SEARCHING)
 
     def test_a_group_waits_for_everyone(self):
-        beta = self.session("Beta")
-        self.social.join(beta.account, self.social.party_of(self.alpha.account))
+        beta = self.beta
         enter_queue(self.alpha, ROLE_QUEUE)
         self.assertEqual(len(self.messages(beta, 44201)), 1)
         self.assertFalse(self.choice(1)["+0x68"])  # Beta gets the banner
@@ -181,8 +187,7 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.entry()["+0x54"], PICKING)
 
     def test_decline_takes_the_party_out_of_the_queue(self):
-        beta = self.session("Beta")
-        self.social.join(beta.account, self.social.party_of(self.alpha.account))
+        beta = self.beta
         enter_queue(self.alpha, ROLE_QUEUE)
         decline(beta, {})
         self.assertEqual(self.party_state()["+0x18"], [])
@@ -192,13 +197,17 @@ class QueueTests(unittest.TestCase):
             self.schemas.encode(QUEUE, 44202, left)
 
     def test_a_priority_pass_is_held_by_the_search_and_given_back(self):
+        beta = self.beta
         profile = self.alpha.account.profile
         profile.priority_passes = {"competitive": 2}
         enter_queue(self.alpha, ROLE_QUEUE)
         self.assertEqual(self.choice(0)["+0x0"], 2)
-        # Ready: the roles, then the pass role. A solo search already started with the roles.
+        # Ready: the roles, then the pass role. The search starts with the last member ready,
+        # and that is when it holds the pass.
         set_roles(self.alpha, {"+0x78": [1]})
         pass_role(self.alpha, {"+0x78": [1]})
+        self.assertEqual(profile.priority_passes["competitive"], 2)
+        set_roles(beta, {"+0x78": [3]})
         self.assertEqual(self.choice(0)["+0x38"], [1])
         self.assertEqual(profile.priority_passes["competitive"], 1)
         (counts,) = self.messages(self.alpha, 58501, PASSES)
@@ -225,13 +234,23 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.alpha.account.profile.priority_passes["competitive"], 3)
 
     def test_cancel_takes_the_others_out_too(self):
-        beta = self.session("Beta")
-        self.social.join(beta.account, self.social.party_of(self.alpha.account))
+        beta = self.beta
         enter_queue(self.alpha, ROLE_QUEUE)
         cancel_queue(self.alpha, {"+0x78": ROLE_QUEUE["+0x78"]})
         self.assertEqual(self.party_state()["+0x18"], [])
         self.assertEqual(self.messages(self.alpha, 44202), [])  # its client dropped the entry itself
         self.assertEqual(len(self.messages(beta, 44202)), 1)
+
+    def test_a_solo_role_queue_searches_without_the_role_screen(self):
+        gamma = self.session("Gamma")  # its own party, one member
+        enter_queue(gamma, ROLE_QUEUE)
+        self.assertEqual(len(self.messages(gamma, 44201)), 1)
+        state = self.schemas.decode(
+            PARTY, 20700,
+            self.schemas.encode(PARTY, 20700,
+                                self.social.party_state(self.social.party_of(gamma.account))))
+        self.assertEqual(state["+0x78"]["+0x18"], [])
+        self.assertEqual(self.searches, [ROLE_QUEUE["+0x78"]["+0x0"]["+0x0"]])
 
 
 if __name__ == "__main__":
